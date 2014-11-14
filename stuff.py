@@ -162,7 +162,7 @@ def cli(region, subnet, user):
     zones = [ zone.name for zone in conn.get_all_zones()]
     ports = [(80, 80, 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer(key_name, zones=None, listeners=ports, subnets=[subnet])
+    lb = elb_conn.create_load_balancer(key_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
     lb.configure_health_check(hc)
     lb.register_instances([instance.id])
 
