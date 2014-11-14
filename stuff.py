@@ -156,7 +156,7 @@ def cli(region, subnet, user):
             interval=20,
             healthy_threshold=3,
             unhealthy_threshold=5,
-            target='HTTP:8080/'
+            target='HTTP:80/'
         )
 
     zones = [ zone.name for zone in conn.get_all_zones()]
