@@ -4,7 +4,7 @@ import boto.ec2
 import boto.ec2.elb
 import boto.manage.cmdshell
 from boto.manage.cmdshell import FakeServer, SSHClient
-from boto.ec2.elb import HealthCheck, ELBConnection
+from boto.ec2.elb import HealthCheck
 import click
 import collections
 import os
@@ -159,7 +159,6 @@ def cli(region, subnet, user):
             target='HTTP:80/'
         )
 
-    zones = [ zone.name for zone in conn.get_all_zones()]
     ports = [(80, 80, 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
     lb = elb_conn.create_load_balancer(key_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
