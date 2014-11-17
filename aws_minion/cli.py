@@ -203,8 +203,6 @@ def activate(ctx, domain, application_name, application_version):
     print(group.instances)
 
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.get_all_load_balancers(load_balancer_names=['app-{}'.format(application_name)])[0]
-    lb.register_instances([i.instance_id for i in group.instances])
 
     dns_conn = boto.route53.connect_to_region(region)
     zone = dns_conn.get_zone(domain + '.')
@@ -484,22 +482,6 @@ def create(ctx, manifest_file):
 
         for rule in rules:
             modify_sg(conn, sg, rule, authorize=True)
-
-    main_port = 80
-
-    hc = HealthCheck(
-        interval=20,
-        healthy_threshold=3,
-        unhealthy_threshold=5,
-        target='HTTP:{}/'.format(main_port)
-    )
-
-    ports = [(main_port, main_port, 'http')]
-    elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer(sg_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
-    # Boto does not support ELB tags (https://github.com/boto/boto/issues/2549)
-    # lb.add_tags({'Manifest': yaml.dump(manifest)})
-    lb.configure_health_check(hc)
 
 
 def main():
