@@ -161,6 +161,53 @@ def versions(ctx):
                 click.secho('{:<30}'.format(instance.tags.get('Team', '')), nl=False)
                 click.secho('{:<20}'.format(instance.state))
 
+@versions.command()
+@click.argument('application-name')
+@click.argument('application-version')
+@click.pass_context
+def activate(ctx, application_name, application_version):
+    """
+    Activate a single application version (put it into the non-versioned LB)
+    """
+    region = ctx.obj['region']
+    subnet = ctx.obj['subnet']
+    user = ctx.obj['user']
+
+    if not user:
+        raise ValueError('Missing user')
+
+    vpc_conn = boto.vpc.connect_to_region(region)
+    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
+    vpc = subnet_obj.vpc_id
+
+    conn = boto.ec2.connect_to_region(region)
+
+    sg_name = 'app-{}'.format(application_name)
+
+    all_security_groups = conn.get_all_security_groups()
+    exists = False
+    for _sg in all_security_groups:
+        if _sg.name == sg_name and _sg.vpc_id == vpc:
+            print(_sg, _sg.id)
+            exists = True
+            manifest = yaml.safe_load(_sg.tags['Manifest'])
+            sg = _sg
+
+    autoscale = boto.ec2.autoscale.connect_to_region(region)
+    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+
+    if not groups:
+        raise Exception('Autoscaling group for application version not found')
+
+    group = groups[0]
+
+    print(group, group.load_balancers)
+    print(group.instances)
+
+    elb_conn = boto.ec2.elb.connect_to_region(region)
+    lb = elb_conn.get_all_load_balancers(load_balancer_names=['app-{}'.format(application_name)])[0]
+    lb.register_instances([ i.instance_id for i in group.instances])
+
 
 @versions.command('create')
 @click.argument('application-name')
