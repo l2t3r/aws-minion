@@ -3,11 +3,11 @@ import boto.vpc
 import boto.ec2
 import boto.ec2.elb
 import boto.ec2.autoscale
+import boto.route53
 from boto.ec2.autoscale import LaunchConfiguration
 from boto.ec2.autoscale import AutoScalingGroup
 
 import boto.manage.cmdshell
-from boto.manage.cmdshell import FakeServer, SSHClient
 from boto.ec2.elb import HealthCheck
 import click
 import collections
@@ -26,7 +26,6 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 
 class AliasedGroup(click.Group):
-
     def get_command(self, ctx, cmd_name):
         rv = click.Group.get_command(self, ctx, cmd_name)
         if rv is not None:
@@ -153,6 +152,7 @@ def versions(ctx):
 
         conn = boto.ec2.connect_to_region(region)
 
+        # TODO: should list auto scaling groups instead of instances
         instances = conn.get_only_instances()
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
@@ -161,11 +161,13 @@ def versions(ctx):
                 click.secho('{:<30}'.format(instance.tags.get('Team', '')), nl=False)
                 click.secho('{:<20}'.format(instance.state))
 
+
 @versions.command()
+@click.option('--domain', help='DNS domain to use')
 @click.argument('application-name')
 @click.argument('application-version')
 @click.pass_context
-def activate(ctx, application_name, application_version):
+def activate(ctx, domain, application_name, application_version):
     """
     Activate a single application version (put it into the non-versioned LB)
     """
@@ -186,12 +188,16 @@ def activate(ctx, application_name, application_version):
 
     all_security_groups = conn.get_all_security_groups()
     exists = False
+    manifest = None
     for _sg in all_security_groups:
         if _sg.name == sg_name and _sg.vpc_id == vpc:
             print(_sg, _sg.id)
             exists = True
             manifest = yaml.safe_load(_sg.tags['Manifest'])
             sg = _sg
+
+    if not manifest:
+        raise Exception('Application not found')
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
     groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
@@ -206,7 +212,125 @@ def activate(ctx, application_name, application_version):
 
     elb_conn = boto.ec2.elb.connect_to_region(region)
     lb = elb_conn.get_all_load_balancers(load_balancer_names=['app-{}'.format(application_name)])[0]
-    lb.register_instances([ i.instance_id for i in group.instances])
+    lb.register_instances([i.instance_id for i in group.instances])
+
+    dns_conn = boto.route53.connect_to_region(region)
+    zone = dns_conn.get_zone(domain + '.')
+    dns_name = '{}.{}.'.format(application_name, domain)
+    rr = zone.get_records()
+    print(rr)
+
+    lb = elb_conn.get_all_load_balancers(
+        load_balancer_names=['app-{}-{}'.format(application_name, application_version.replace('.', '-'))])[0]
+
+    change = rr.add_change('UPSERT', dns_name, 'CNAME', ttl=60, weight=1)
+    change.add_value(lb.dns_name)
+
+
+@versions.command()
+@click.argument('application-name')
+@click.argument('application-version')
+@click.argument('desired-instances', type=int)
+@click.pass_context
+def scale(ctx, application_name, application_version, desired_instances):
+    """
+    Activate a single application version (put it into the non-versioned LB)
+    """
+    region = ctx.obj['region']
+    subnet = ctx.obj['subnet']
+    user = ctx.obj['user']
+
+    if not user:
+        raise ValueError('Missing user')
+
+    vpc_conn = boto.vpc.connect_to_region(region)
+    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
+    vpc = subnet_obj.vpc_id
+
+    conn = boto.ec2.connect_to_region(region)
+
+    sg_name = 'app-{}'.format(application_name)
+
+    all_security_groups = conn.get_all_security_groups()
+    exists = False
+    manifest = None
+    for _sg in all_security_groups:
+        if _sg.name == sg_name and _sg.vpc_id == vpc:
+            print(_sg, _sg.id)
+            exists = True
+            manifest = yaml.safe_load(_sg.tags['Manifest'])
+            sg = _sg
+
+    if not manifest:
+        raise Exception('Application not found')
+
+    autoscale = boto.ec2.autoscale.connect_to_region(region)
+    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+
+    if not groups:
+        raise Exception('Autoscaling group for application version not found')
+
+    group = groups[0]
+
+    print(group, group.load_balancers)
+    group.set_capacity(desired_instances)
+
+
+@versions.command('delete')
+@click.argument('application-name')
+@click.argument('application-version')
+@click.pass_context
+def delete_version(ctx, application_name, application_version):
+    region = ctx.obj['region']
+    subnet = ctx.obj['subnet']
+    user = ctx.obj['user']
+
+    vpc_conn = boto.vpc.connect_to_region(region)
+    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
+    vpc = subnet_obj.vpc_id
+
+    conn = boto.ec2.connect_to_region(region)
+
+    sg_name = 'app-{}'.format(application_name)
+
+    all_security_groups = conn.get_all_security_groups()
+    exists = False
+    manifest = None
+    for _sg in all_security_groups:
+        if _sg.name == sg_name and _sg.vpc_id == vpc:
+            print(_sg, _sg.id)
+            exists = True
+            manifest = yaml.safe_load(_sg.tags['Manifest'])
+            sg = _sg
+
+    if not manifest:
+        raise Exception('Application not found')
+
+    autoscale = boto.ec2.autoscale.connect_to_region(region)
+    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+
+    if not groups:
+        raise Exception('Autoscaling group for application version not found')
+
+    group = groups[0]
+
+    print([i.__dict__ for i in group.instances])
+    group.shutdown_instances()
+
+    # wait for shutdown
+    while [instance for instance in group.instances if instance.lifecycle_state.lower() not in ('terminated',)]:
+        print(group.instances)
+        # TODO: this does not work
+        group.update()
+        time.sleep(3)
+
+    group.delete()
+
+    lcs = autoscale.get_all_launch_configurations(
+        names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+
+    for lc in lcs:
+        lc.delete()
 
 
 @versions.command('create')
@@ -247,7 +371,6 @@ def create_version(ctx, application_name, application_version, docker_image):
         raise Exception('Application not found')
 
     key_name = sg_name
-    key_dir = os.path.expanduser('~/.ssh')
 
     init_script = '''#!/bin/bash
     # add Docker repo
@@ -266,56 +389,14 @@ def create_version(ctx, application_name, application_version, docker_image):
 
     vpc_info = ','.join([subnet])
 
-    lc = LaunchConfiguration(name='app-{}-{}'.format(manifest['application_name'], application_version), image_id=AMI_ID,
+    lc = LaunchConfiguration(name='app-{}-{}'.format(manifest['application_name'], application_version),
+                             image_id=AMI_ID,
                              key_name=key_name,
                              security_groups=[sg.id],
                              user_data=init_script.encode('utf-8'), instance_type='t2.micro',
 
                              associate_public_ip_address=True)
     autoscale.create_launch_configuration(lc)
-
-
-
-    #interface = boto.ec2.networkinterface.NetworkInterfaceSpecification(subnet_id=subnet,
-    #                                                                   groups=[sg.id],
-    #                                                                    associate_public_ip_address=True)
-    #interfaces = boto.ec2.networkinterface.NetworkInterfaceCollection(interface)
-
-
-
-    #reservation = conn.run_instances(AMI_ID, instance_type='t2.micro', network_interfaces=interfaces, key_name=key_name,
-    #                                 user_data=init_script.encode('utf-8'))
-    #instance = reservation.instances[0]
-    #instance.add_tags({'Name': 'app-{}-{}'.format(manifest['application_name'], application_version),
-    #                   'Team': manifest['team_name']})
-
-    # time.sleep(3)
-    #
-    # # Check up on its status every so often
-    # status = instance.update()
-    # while status == 'pending':
-    #     time.sleep(3)
-    #     status = instance.update()
-    #
-    # print('Instance status: ' + status)
-    # print(instance.id)
-    #
-    # key_extension = '.pem'
-    # login_user = 'ubuntu'
-    # key_path = os.path.join(os.path.expanduser(key_dir), key_name + key_extension)
-    # s = FakeServer(instance, key_path)
-    # # HACK: we do not have public DNS...
-    # while True:
-    #     if instance.ip_address and len(instance.ip_address) > 4:
-    #         s.hostname = instance.ip_address
-    #         break
-    #     print('Waiting for IP address..')
-    #     instance = conn.get_only_instances(instance_ids=[instance.id])[0]
-    #     time.sleep(3)
-    # print('ssh -i {} ubuntu@{}'.format(s.ssh_key_file, s.hostname))
-    # cmd = SSHClient(s, os.path.expanduser('~/.ssh/known_hosts'), login_user)
-    # res = cmd.run('uptime')
-    # print(res)
 
     hc = HealthCheck(
         interval=20,
@@ -327,31 +408,34 @@ def create_version(ctx, application_name, application_version, docker_image):
     ports = [(manifest['exposed_ports'][0], manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
     lb = elb_conn.create_load_balancer('app-{}-{}'.format(manifest['application_name'],
-                                       application_version.replace('.', '-')), zones=None, listeners=ports,
+                                                          application_version.replace('.', '-')), zones=None,
+                                       listeners=ports,
                                        subnets=[subnet], security_groups=[sg.id])
     lb.configure_health_check(hc)
 
-    ag = AutoScalingGroup(group_name='app-{}-{}'.format(manifest['application_name'], application_version),
-                          load_balancers=['app-{}-{}'.format(manifest['application_name'], application_version.replace('.', '-'))],
+    group_name = 'app-{}-{}'.format(manifest['application_name'], application_version)
+
+    ag = AutoScalingGroup(group_name=group_name,
+                          load_balancers=[
+                              'app-{}-{}'.format(manifest['application_name'], application_version.replace('.', '-'))],
                           availability_zones=[subnet_obj.availability_zone],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
                           connection=autoscale)
     autoscale.create_auto_scaling_group(ag)
 
-    tags = [ boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Name', value='app-{}-{}'.format(manifest['application_name'], application_version),
-                                        resource_id='app-{}-{}'.format(manifest['application_name'], application_version),
-                                        propagate_at_launch=True),
-            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Tean', value=manifest['team_name'],
-                                        resource_id='app-{}-{}'.format(manifest['application_name'], application_version),
-                                        propagate_at_launch=True)
-             ]
+    tags = [boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Name', value=group_name,
+                                       resource_id=group_name,
+                                       propagate_at_launch=True),
+            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Team', value=manifest['team_name'],
+                                       resource_id=group_name,
+                                       propagate_at_launch=True)
+    ]
     autoscale.create_or_update_tags(tags)
 
     ag.set_capacity(1)
 
-    #lb.register_instances([instance.id])
-
+    # lb.register_instances([instance.id])
 
 
 @applications.command()
@@ -435,6 +519,7 @@ def create(ctx, manifest_file):
 
 def main():
     cli()
+
 
 if __name__ == '__main__':
     main()
