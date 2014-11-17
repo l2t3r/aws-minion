@@ -31,7 +31,9 @@ Example run:
 
 .. code-block:: bash
 
-    $ minion --region eu-west-1 --subnet mysubnet-id --user myuser app create myapp.yaml
+    $ minion --region eu-west-1 --subnet mysubnet-id --user myuser app create examples/myapp.yaml
+    $ minion app ver create myapp 0.1 nginx
+    $ minion app ver activate myapp 0.1
 
 
 CLI
