@@ -15,9 +15,11 @@ import yaml
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 AMI_ID = 'ami-f0b11187'
 
-SecurityGroupRule = collections.namedtuple("SecurityGroupRule", ["ip_protocol", "from_port", "to_port", "cidr_ip", "src_group_name"])
+SecurityGroupRule = collections.namedtuple("SecurityGroupRule",
+                                           ["ip_protocol", "from_port", "to_port", "cidr_ip", "src_group_name"])
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
 
 class AliasedGroup(click.Group):
 
@@ -43,25 +45,27 @@ def generate_random_name(prefix: str, size: int) -> str:
     """
     return '{}%0{}x'.format(prefix, size) % random.randrange(16 ** size)
 
+
 def modify_sg(c, group, rule, authorize=False, revoke=False):
     src_group = None
     if rule.src_group_name:
-        src_group = c.get_all_security_groups([rule.src_group_name,])[0]
+        src_group = c.get_all_security_groups([rule.src_group_name])[0]
 
     if authorize and not revoke:
-        print("Authorizing missing rule %s..."%(rule,))
+        print("Authorizing missing rule %s..." % (rule,))
         group.authorize(ip_protocol=rule.ip_protocol,
                         from_port=rule.from_port,
                         to_port=rule.to_port,
                         cidr_ip=rule.cidr_ip,
                         src_group=src_group)
     elif not authorize and revoke:
-        print("Revoking unexpected rule %s..."%(rule,))
+        print("Revoking unexpected rule %s..." % (rule,))
         group.revoke(ip_protocol=rule.ip_protocol,
                      from_port=rule.from_port,
                      to_port=rule.to_port,
                      cidr_ip=rule.cidr_ip,
                      src_group=src_group)
+
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.option('--region')
@@ -69,19 +73,52 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 @click.option('--user')
 @click.pass_context
 def cli(ctx, region, subnet, user):
-    ctx.obj = vars()
+    param_data = {'region': region, 'subnet': subnet, 'user': user}
+    path = os.path.expanduser('~/.aws-minion.yaml')
+    if os.path.exists(path):
+        with open(path, 'rb') as fd:
+            data = yaml.safe_load(fd)
+    for k, v in param_data.items():
+        if v:
+            data[k] = v
+    with open(path, 'w', encoding='utf-8') as fd:
+        fd.write(yaml.dump(data))
+    ctx.obj = data
+
+
+@cli.command()
+@click.pass_context
+def cleanup(ctx):
+    '''
+    Terminate all running instances for the current user
+    '''
+    region = ctx.obj['region']
+    user = ctx.obj['user']
+
+    if not user:
+        raise ValueError('Missing user')
+
+    conn = boto.ec2.connect_to_region(region)
+
+    for instance in conn.get_only_instances():
+        if 'Name' in instance.tags and instance.tags['Name'].startswith(user + '-'):
+            print('Terminating', instance.id, instance.tags)
+            instance.terminate()
+
 
 @cli.group(cls=AliasedGroup)
 @click.pass_context
 def applications(ctx):
     pass
 
+
 @applications.group(cls=AliasedGroup)
 @click.pass_context
 def versions(ctx):
     pass
 
-@versions.command()
+
+@versions.command('create')
 @click.pass_context
 def create_version(ctx):
     pass
@@ -91,6 +128,9 @@ def create_version(ctx):
 @click.argument('manifest-file', type=click.File('rb'))
 @click.pass_context
 def create(ctx, manifest_file):
+    '''
+    Create a new application
+    '''
 
     try:
         manifest = yaml.safe_load(manifest_file.read())
@@ -98,7 +138,6 @@ def create(ctx, manifest_file):
         raise click.UsageError('Failed to parse YAML file: {}'.format(e))
 
     print(manifest)
-
 
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
@@ -112,11 +151,6 @@ def create(ctx, manifest_file):
     vpc = subnet_obj.vpc_id
 
     conn = boto.ec2.connect_to_region(region)
-
-    for instance in conn.get_only_instances():
-        if 'Name' in instance.tags and instance.tags['Name'].startswith(user + '-'):
-            print('Terminating', instance.id, instance.tags)
-            instance.terminate()
 
     sg_name = generate_random_name(user + '-', 6)
     key_name = sg_name
@@ -134,7 +168,7 @@ def create(ctx, manifest_file):
         modify_sg(conn, sg, rule, authorize=True)
 
     interface = boto.ec2.networkinterface.NetworkInterfaceSpecification(subnet_id=subnet,
-                                                                                groups=[sg.id],                                                                                                                                                associate_public_ip_address=True)
+                                                                        groups=[sg.id],                                                                                                                                                associate_public_ip_address=True)
     interfaces = boto.ec2.networkinterface.NetworkInterfaceCollection(interface)
 
     init_script = b'''#!/bin/bash
@@ -221,6 +255,7 @@ def create(ctx, manifest_file):
     lb = elb_conn.create_load_balancer(key_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
     lb.configure_health_check(hc)
     lb.register_instances([instance.id])
+
 
 def main():
     cli()

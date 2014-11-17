@@ -6,3 +6,4 @@ junit.xml
 *.pyc
 __pycache__
 build
+.idea
