@@ -2,6 +2,10 @@
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
+import boto.ec2.autoscale
+from boto.ec2.autoscale import LaunchConfiguration
+from boto.ec2.autoscale import AutoScalingGroup
+
 import boto.manage.cmdshell
 from boto.manage.cmdshell import FakeServer, SSHClient
 from boto.ec2.elb import HealthCheck
@@ -153,7 +157,8 @@ def versions(ctx):
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
                 click.secho('{:<20}'.format(instance.tags['Name']), bold=True, nl=False)
-                click.secho('{:<30}'.format(instance.tags['Team']), nl=False)
+                click.secho('{:<20}'.format(instance.id), nl=False)
+                click.secho('{:<30}'.format(instance.tags.get('Team', '')), nl=False)
                 click.secho('{:<20}'.format(instance.state))
 
 
@@ -197,11 +202,6 @@ def create_version(ctx, application_name, application_version, docker_image):
     key_name = sg_name
     key_dir = os.path.expanduser('~/.ssh')
 
-    interface = boto.ec2.networkinterface.NetworkInterfaceSpecification(subnet_id=subnet,
-                                                                        groups=[sg.id],
-                                                                        associate_public_ip_address=True)
-    interfaces = boto.ec2.networkinterface.NetworkInterfaceCollection(interface)
-
     init_script = '''#!/bin/bash
     # add Docker repo
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
@@ -215,39 +215,60 @@ def create_version(ctx, application_name, application_version, docker_image):
     docker run -d -p {exposed_port}:{exposed_port} {docker_image}
     '''.format(docker_image=docker_image, exposed_port=manifest['exposed_ports'][0])
 
-    reservation = conn.run_instances(AMI_ID, instance_type='t2.micro', network_interfaces=interfaces, key_name=key_name,
-                                     user_data=init_script.encode('utf-8'))
-    instance = reservation.instances[0]
-    instance.add_tags({'Name': 'app-{}-{}'.format(manifest['application_name'], application_version),
-                       'Team': manifest['team_name']})
+    autoscale = boto.ec2.autoscale.connect_to_region(region)
 
-    time.sleep(3)
+    vpc_info = ','.join([subnet])
 
-    # Check up on its status every so often
-    status = instance.update()
-    while status == 'pending':
-        time.sleep(3)
-        status = instance.update()
+    lc = LaunchConfiguration(name='app-{}-{}'.format(manifest['application_name'], application_version), image_id=AMI_ID,
+                             key_name=key_name,
+                             security_groups=[sg.id],
+                             user_data=init_script.encode('utf-8'), instance_type='t2.micro',
 
-    print('Instance status: ' + status)
-    print(instance.id)
+                             associate_public_ip_address=True)
+    autoscale.create_launch_configuration(lc)
 
-    key_extension = '.pem'
-    login_user = 'ubuntu'
-    key_path = os.path.join(os.path.expanduser(key_dir), key_name + key_extension)
-    s = FakeServer(instance, key_path)
-    # HACK: we do not have public DNS...
-    while True:
-        if instance.ip_address and len(instance.ip_address) > 4:
-            s.hostname = instance.ip_address
-            break
-        print('Waiting for IP address..')
-        instance = conn.get_only_instances(instance_ids=[instance.id])[0]
-        time.sleep(3)
-    print('ssh -i {} ubuntu@{}'.format(s.ssh_key_file, s.hostname))
-    cmd = SSHClient(s, os.path.expanduser('~/.ssh/known_hosts'), login_user)
-    res = cmd.run('uptime')
-    print(res)
+
+
+    #interface = boto.ec2.networkinterface.NetworkInterfaceSpecification(subnet_id=subnet,
+    #                                                                   groups=[sg.id],
+    #                                                                    associate_public_ip_address=True)
+    #interfaces = boto.ec2.networkinterface.NetworkInterfaceCollection(interface)
+
+
+
+    #reservation = conn.run_instances(AMI_ID, instance_type='t2.micro', network_interfaces=interfaces, key_name=key_name,
+    #                                 user_data=init_script.encode('utf-8'))
+    #instance = reservation.instances[0]
+    #instance.add_tags({'Name': 'app-{}-{}'.format(manifest['application_name'], application_version),
+    #                   'Team': manifest['team_name']})
+
+    # time.sleep(3)
+    #
+    # # Check up on its status every so often
+    # status = instance.update()
+    # while status == 'pending':
+    #     time.sleep(3)
+    #     status = instance.update()
+    #
+    # print('Instance status: ' + status)
+    # print(instance.id)
+    #
+    # key_extension = '.pem'
+    # login_user = 'ubuntu'
+    # key_path = os.path.join(os.path.expanduser(key_dir), key_name + key_extension)
+    # s = FakeServer(instance, key_path)
+    # # HACK: we do not have public DNS...
+    # while True:
+    #     if instance.ip_address and len(instance.ip_address) > 4:
+    #         s.hostname = instance.ip_address
+    #         break
+    #     print('Waiting for IP address..')
+    #     instance = conn.get_only_instances(instance_ids=[instance.id])[0]
+    #     time.sleep(3)
+    # print('ssh -i {} ubuntu@{}'.format(s.ssh_key_file, s.hostname))
+    # cmd = SSHClient(s, os.path.expanduser('~/.ssh/known_hosts'), login_user)
+    # res = cmd.run('uptime')
+    # print(res)
 
     hc = HealthCheck(
         interval=20,
@@ -262,7 +283,28 @@ def create_version(ctx, application_name, application_version, docker_image):
                                        application_version.replace('.', '-')), zones=None, listeners=ports,
                                        subnets=[subnet], security_groups=[sg.id])
     lb.configure_health_check(hc)
-    lb.register_instances([instance.id])
+
+    ag = AutoScalingGroup(group_name='app-{}-{}'.format(manifest['application_name'], application_version),
+                          load_balancers=['app-{}-{}'.format(manifest['application_name'], application_version.replace('.', '-'))],
+                          availability_zones=[subnet_obj.availability_zone],
+                          launch_config=lc, min_size=0, max_size=8,
+                          vpc_zone_identifier=vpc_info,
+                          connection=autoscale)
+    autoscale.create_auto_scaling_group(ag)
+
+    tags = [ boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Name', value='app-{}-{}'.format(manifest['application_name'], application_version),
+                                        resource_id='app-{}-{}'.format(manifest['application_name'], application_version),
+                                        propagate_at_launch=True),
+            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Tean', value=manifest['team_name'],
+                                        resource_id='app-{}-{}'.format(manifest['application_name'], application_version),
+                                        propagate_at_launch=True)
+             ]
+    autoscale.create_or_update_tags(tags)
+
+    ag.set_capacity(1)
+
+    #lb.register_instances([instance.id])
+
 
 
 @applications.command()
