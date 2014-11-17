@@ -2,3 +2,4 @@
 application_name: myapp
 team_name: MyOrganization/MyTeam
 stateful: false
+exposed_ports: [80]

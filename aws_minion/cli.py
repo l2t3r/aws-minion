@@ -119,26 +119,14 @@ def versions(ctx):
 
 
 @versions.command('create')
+@click.argument('application-name')
+@click.argument('application-version')
+@click.argument('docker-image')
 @click.pass_context
-def create_version(ctx):
-    pass
-
-
-@applications.command()
-@click.argument('manifest-file', type=click.File('rb'))
-@click.pass_context
-def create(ctx, manifest_file):
+def create_version(ctx, application_name, application_version, docker_image):
     """
-    Create a new application
+    Create a new application version
     """
-
-    try:
-        manifest = yaml.safe_load(manifest_file.read())
-    except Exception as e:
-        raise click.UsageError('Failed to parse YAML file: {}'.format(e))
-
-    print(manifest)
-
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
     user = ctx.obj['user']
@@ -255,6 +243,65 @@ def create(ctx, manifest_file):
     lb = elb_conn.create_load_balancer(key_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
     lb.configure_health_check(hc)
     lb.register_instances([instance.id])
+
+
+@applications.command()
+@click.argument('manifest-file', type=click.File('rb'))
+@click.pass_context
+def create(ctx, manifest_file):
+    """
+    Create a new application
+    """
+
+    try:
+        manifest = yaml.safe_load(manifest_file.read())
+    except Exception as e:
+        raise click.UsageError('Failed to parse YAML file: {}'.format(e))
+
+    print(manifest)
+
+    application_name = manifest['application_name']
+
+    region = ctx.obj['region']
+    subnet = ctx.obj['subnet']
+    user = ctx.obj['user']
+
+    if not user:
+        raise ValueError('Missing user')
+
+    conn = boto.ec2.connect_to_region(region)
+
+    vpc_conn = boto.vpc.connect_to_region(region)
+    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
+    vpc = subnet_obj.vpc_id
+
+    sg_name = 'app-{}'.format(application_name)
+
+    sg = conn.create_security_group(sg_name, 'Some test group created by ' + user, vpc_id=vpc)
+
+    rules = [
+        SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
+        SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
+        SecurityGroupRule("tcp", 443, 80, "0.0.0.0/0", None)
+    ]
+
+    for rule in rules:
+        modify_sg(conn, sg, rule, authorize=True)
+
+    main_port = 80
+
+    hc = HealthCheck(
+        interval=20,
+        healthy_threshold=3,
+        unhealthy_threshold=5,
+        target='HTTP:{}/'.format(main_port)
+    )
+
+    ports = [(main_port, main_port, 'http')]
+    elb_conn = boto.ec2.elb.connect_to_region(region)
+    lb = elb_conn.create_load_balancer(application_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
+    lb.configure_health_check(hc)
+
 
 
 def main():
