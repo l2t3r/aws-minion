@@ -110,8 +110,8 @@ def applications(ctx):
         for _sg in all_security_groups:
             if _sg.name.startswith('app-') and _sg.vpc_id == vpc:
                 manifest = yaml.safe_load(_sg.tags['Manifest'])
-                rows.append(manifest)
-        print_table('application_name team_name'.split(), rows)
+                rows.append({k: str(v) for k, v in manifest.items()})
+        print_table('application_name team_name exposed_ports stateful'.split(), rows)
 
 
 @applications.group(cls=AliasedGroup, invoke_without_command=True)
