@@ -17,6 +17,8 @@ import time
 import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
+from aws_minion.console import print_table
+
 AMI_ID = 'ami-f0b11187'
 
 SecurityGroupRule = collections.namedtuple("SecurityGroupRule",
@@ -71,12 +73,12 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
-@click.option('--region')
-@click.option('--subnet')
-@click.option('--user')
+@click.option('--region', help='AWS region ID')
+@click.option('--subnet', help='AWS subnet ID')
+@click.option('--domain', help='DNS domain (e.g. apps.example.org)')
 @click.pass_context
-def cli(ctx, region, subnet, user):
-    param_data = {'region': region, 'subnet': subnet, 'user': user}
+def cli(ctx, region, subnet, domain):
+    param_data = {'region': region, 'subnet': subnet, 'domain': domain}
     path = os.path.expanduser('~/.aws-minion.yaml')
     if os.path.exists(path):
         with open(path, 'rb') as fd:
@@ -89,26 +91,6 @@ def cli(ctx, region, subnet, user):
     ctx.obj = data
 
 
-@cli.command()
-@click.pass_context
-def cleanup(ctx):
-    """
-    Terminate all running instances for the current user
-    """
-    region = ctx.obj['region']
-    user = ctx.obj['user']
-
-    if not user:
-        raise ValueError('Missing user')
-
-    conn = boto.ec2.connect_to_region(region)
-
-    for instance in conn.get_only_instances():
-        if 'Name' in instance.tags and instance.tags['Name'].startswith(user + '-'):
-            print('Terminating', instance.id, instance.tags)
-            instance.terminate()
-
-
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def applications(ctx):
@@ -116,10 +98,6 @@ def applications(ctx):
         # list apps
         region = ctx.obj['region']
         subnet = ctx.obj['subnet']
-        user = ctx.obj['user']
-
-        if not user:
-            raise ValueError('Missing user')
 
         vpc_conn = boto.vpc.connect_to_region(region)
         subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
@@ -127,51 +105,51 @@ def applications(ctx):
 
         conn = boto.ec2.connect_to_region(region)
 
+        rows = []
         all_security_groups = conn.get_all_security_groups()
         for _sg in all_security_groups:
             if _sg.name.startswith('app-') and _sg.vpc_id == vpc:
-                click.secho(_sg.name, bold=True)
-                click.secho('{}'.format(_sg.tags['Manifest']))
+                manifest = yaml.safe_load(_sg.tags['Manifest'])
+                rows.append(manifest)
+        print_table('application_name team_name'.split(), rows)
 
 
 @applications.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def versions(ctx):
+    """
+    Manage application versions
+    """
     if not ctx.invoked_subcommand:
         # list apps
         region = ctx.obj['region']
-        user = ctx.obj['user']
-
-        if not user:
-            raise ValueError('Missing user')
 
         conn = boto.ec2.connect_to_region(region)
 
         # TODO: should list auto scaling groups instead of instances
         instances = conn.get_only_instances()
+        rows = []
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
-                click.secho('{:<20}'.format(instance.tags['Name']), bold=True, nl=False)
-                click.secho('{:<20}'.format(instance.id), nl=False)
-                click.secho('{:<30}'.format(instance.tags.get('Team', '')), nl=False)
-                click.secho('{:<20}'.format(instance.state))
+                rows.append({'application_version': instance.tags['Name'], 'instance_id': instance.id, 'team':instance.tags.get('Team', ''), 'state': instance.state.upper()})
+        print_table('application_version instance_id team state'.split(), rows)
 
 
 @versions.command()
-@click.option('--domain', help='DNS domain to use')
 @click.argument('application-name')
 @click.argument('application-version')
 @click.pass_context
-def activate(ctx, domain, application_name, application_version):
+def activate(ctx, application_name, application_version):
     """
     Activate a single application version (put it into the non-versioned LB)
     """
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
-    user = ctx.obj['user']
+    domain = ctx.obj['domain']
 
-    if not user:
-        raise ValueError('Missing user')
+
+    if not domain:
+        raise ValueError('Missing DNS domain setting')
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
@@ -224,14 +202,10 @@ def activate(ctx, domain, application_name, application_version):
 @click.pass_context
 def scale(ctx, application_name, application_version, desired_instances):
     """
-    Activate a single application version (put it into the non-versioned LB)
+    Scale an application version (set desired instance count)
     """
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
-    user = ctx.obj['user']
-
-    if not user:
-        raise ValueError('Missing user')
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
@@ -268,6 +242,9 @@ def scale(ctx, application_name, application_version, desired_instances):
 @click.argument('application-version')
 @click.pass_context
 def delete_version(ctx, application_name, application_version):
+    """
+    Delete an application version and shutdown all associated instances
+    """
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
 
@@ -327,10 +304,6 @@ def create_version(ctx, application_name, application_version, docker_image):
     """
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
-    user = ctx.obj['user']
-
-    if not user:
-        raise ValueError('Missing user')
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
@@ -441,10 +414,6 @@ def create(ctx, manifest_file):
 
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
-    user = ctx.obj['user']
-
-    if not user:
-        raise ValueError('Missing user')
 
     conn = boto.ec2.connect_to_region(region)
 
@@ -470,7 +439,7 @@ def create(ctx, manifest_file):
             sg = _sg
             # conn.delete_security_group(group_id=sg.id)
     if not exists:
-        sg = conn.create_security_group(sg_name, 'Some test group created by ' + user, vpc_id=vpc)
+        sg = conn.create_security_group(sg_name, 'Some test group created by ..', vpc_id=vpc)
         # HACK: add manifest as tag
         sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
