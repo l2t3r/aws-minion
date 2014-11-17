@@ -96,6 +96,9 @@ def cli(ctx, region, subnet, domain):
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def applications(ctx):
+    """
+    Manage applications, list all apps
+    """
     if not ctx.invoked_subcommand:
         # list apps
         region = ctx.obj['region']
@@ -120,7 +123,7 @@ def applications(ctx):
 @click.pass_context
 def versions(ctx):
     """
-    Manage application versions
+    Manage application versions, list all versions
     """
     if not ctx.invoked_subcommand:
         # list apps
@@ -323,7 +326,6 @@ def create_version(ctx, application_name, application_version, docker_image):
             exists = True
             manifest = yaml.safe_load(_sg.tags['Manifest'])
             sg = _sg
-            # conn.delete_security_group(group_id=sg.id)
 
     if not exists:
         raise Exception('Application not found')
@@ -393,8 +395,6 @@ def create_version(ctx, application_name, application_version, docker_image):
 
     ag.set_capacity(1)
 
-    # lb.register_instances([instance.id])
-
 
 @applications.command()
 @click.argument('manifest-file', type=click.File('rb'))
@@ -438,8 +438,6 @@ def create(ctx, manifest_file):
             print(_sg, _sg.id)
             exists = True
             print(yaml.safe_load(_sg.tags['Manifest']))
-            sg = _sg
-            # conn.delete_security_group(group_id=sg.id)
     if not exists:
         sg = conn.create_security_group(sg_name, 'Some test group created by ..', vpc_id=vpc)
         # HACK: add manifest as tag
