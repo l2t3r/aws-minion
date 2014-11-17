@@ -89,9 +89,9 @@ def cli(ctx, region, subnet, user):
 @cli.command()
 @click.pass_context
 def cleanup(ctx):
-    '''
+    """
     Terminate all running instances for the current user
-    '''
+    """
     region = ctx.obj['region']
     user = ctx.obj['user']
 
@@ -128,9 +128,9 @@ def create_version(ctx):
 @click.argument('manifest-file', type=click.File('rb'))
 @click.pass_context
 def create(ctx, manifest_file):
-    '''
+    """
     Create a new application
-    '''
+    """
 
     try:
         manifest = yaml.safe_load(manifest_file.read())
@@ -168,7 +168,8 @@ def create(ctx, manifest_file):
         modify_sg(conn, sg, rule, authorize=True)
 
     interface = boto.ec2.networkinterface.NetworkInterfaceSpecification(subnet_id=subnet,
-                                                                        groups=[sg.id],                                                                                                                                                associate_public_ip_address=True)
+                                                                        groups=[sg.id],
+                                                                        associate_public_ip_address=True)
     interfaces = boto.ec2.networkinterface.NetworkInterfaceCollection(interface)
 
     init_script = b'''#!/bin/bash
@@ -209,7 +210,8 @@ def create(ctx, manifest_file):
     docker run -d -p 80:80 nginx
     '''
 
-    reservation = conn.run_instances(AMI_ID, instance_type='t2.micro', network_interfaces=interfaces, key_name=key_name, user_data=init_script)
+    reservation = conn.run_instances(AMI_ID, instance_type='t2.micro', network_interfaces=interfaces, key_name=key_name,
+                                     user_data=init_script)
     instance = reservation.instances[0]
     instance.add_tags({'Name': key_name})
 
@@ -224,11 +226,9 @@ def create(ctx, manifest_file):
     print('Instance status: ' + status)
     print(instance.id)
 
-
     key_extension = '.pem'
     login_user = 'ubuntu'
-    key_path = os.path.join(os.path.expanduser(key_dir),
-                                    key_name+key_extension)
+    key_path = os.path.join(os.path.expanduser(key_dir), key_name + key_extension)
     s = FakeServer(instance, key_path)
     # HACK: we do not have public DNS...
     while True:
@@ -244,11 +244,11 @@ def create(ctx, manifest_file):
     print(res)
 
     hc = HealthCheck(
-            interval=20,
-            healthy_threshold=3,
-            unhealthy_threshold=5,
-            target='HTTP:80/'
-        )
+        interval=20,
+        healthy_threshold=3,
+        unhealthy_threshold=5,
+        target='HTTP:80/'
+    )
 
     ports = [(80, 80, 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
