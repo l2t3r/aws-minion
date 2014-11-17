@@ -5,3 +5,4 @@ junit.xml
 .coverage
 *.pyc
 __pycache__
+build

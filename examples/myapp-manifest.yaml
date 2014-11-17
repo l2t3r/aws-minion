@@ -1,0 +1,4 @@
+---
+application_name: myapp
+team_name: MyOrganization/MyTeam
+stateful: false

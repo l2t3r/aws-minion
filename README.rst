@@ -1,12 +1,37 @@
-===========
-AWS "Stuff"
-===========
+==========
+AWS Minion
+==========
 
-Start a single instance with Docker and ELB:
+
+Installing
+==========
+
+Install from PyPI:
 
 .. code-block:: bash
 
-    $ ./stuff.py --region eu-west-1 --subnet mysubnet-id --user myuser
+    $ sudo pip3 install aws-minion
+
+Install from source:
+
+.. code-block:: bash
+
+    $ sudo python3 setup.py install
+
+Running
+=======
+
+.. code-block:: bash
+
+    $ python3 -m aws_minion # run from source
+    $ minion ...            # run installed console script
+
+
+Example run:
+
+.. code-block:: bash
+
+    $ minion --region eu-west-1 --subnet mysubnet-id --user myuser app create myapp.yaml
 
 
 CLI
@@ -32,8 +57,7 @@ Workflow
   * Create application version ELB and DNS entry
   * Start at least one instance (without getting traffic)
 
-
-minion applications
+* ``minion app[lications] ver[sions] traffic my-app 0.1 100%``
 
 
 Manifest

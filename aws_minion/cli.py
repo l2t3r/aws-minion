@@ -10,11 +10,29 @@ import collections
 import os
 import random
 import time
+import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 AMI_ID = 'ami-f0b11187'
 
 SecurityGroupRule = collections.namedtuple("SecurityGroupRule", ["ip_protocol", "from_port", "to_port", "cidr_ip", "src_group_name"])
+
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
+class AliasedGroup(click.Group):
+
+    def get_command(self, ctx, cmd_name):
+        rv = click.Group.get_command(self, ctx, cmd_name)
+        if rv is not None:
+            return rv
+        matches = [x for x in self.list_commands(ctx)
+                   if x.startswith(cmd_name)]
+        if not matches:
+            return None
+        elif len(matches) == 1:
+            return click.Group.get_command(self, ctx, matches[0])
+        ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
+
 
 def generate_random_name(prefix: str, size: int) -> str:
     """
@@ -45,11 +63,50 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
                      cidr_ip=rule.cidr_ip,
                      src_group=src_group)
 
-@click.command()
+@click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.option('--region')
 @click.option('--subnet')
 @click.option('--user')
-def cli(region, subnet, user):
+@click.pass_context
+def cli(ctx, region, subnet, user):
+    ctx.obj = vars()
+
+@cli.group(cls=AliasedGroup)
+@click.pass_context
+def applications(ctx):
+    pass
+
+@applications.group(cls=AliasedGroup)
+@click.pass_context
+def versions(ctx):
+    pass
+
+@versions.command()
+@click.pass_context
+def create_version(ctx):
+    pass
+
+
+@applications.command()
+@click.argument('manifest-file', type=click.File('rb'))
+@click.pass_context
+def create(ctx, manifest_file):
+
+    try:
+        manifest = yaml.safe_load(manifest_file.read())
+    except Exception as e:
+        raise click.UsageError('Failed to parse YAML file: {}'.format(e))
+
+    print(manifest)
+
+
+    region = ctx.obj['region']
+    subnet = ctx.obj['subnet']
+    user = ctx.obj['user']
+
+    if not user:
+        raise ValueError('Missing user')
+
     vpc_conn = boto.vpc.connect_to_region(region)
     subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
     vpc = subnet_obj.vpc_id
