@@ -83,6 +83,8 @@ def cli(ctx, region, subnet, domain):
     if os.path.exists(path):
         with open(path, 'rb') as fd:
             data = yaml.safe_load(fd)
+    else:
+        data = {}
     for k, v in param_data.items():
         if v:
             data[k] = v
@@ -131,7 +133,8 @@ def versions(ctx):
         rows = []
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
-                rows.append({'application_version': instance.tags['Name'], 'instance_id': instance.id, 'team':instance.tags.get('Team', ''), 'state': instance.state.upper()})
+                rows.append({'application_version': instance.tags['Name'], 'instance_id': instance.id,
+                             'team': instance.tags.get('Team', ''), 'state': instance.state.upper()})
         print_table('application_version instance_id team state'.split(), rows)
 
 
@@ -146,7 +149,6 @@ def activate(ctx, application_name, application_version):
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
     domain = ctx.obj['domain']
-
 
     if not domain:
         raise ValueError('Missing DNS domain setting')
