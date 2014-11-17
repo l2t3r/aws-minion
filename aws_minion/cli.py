@@ -106,16 +106,55 @@ def cleanup(ctx):
             instance.terminate()
 
 
-@cli.group(cls=AliasedGroup)
+@cli.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def applications(ctx):
-    pass
+    if not ctx.invoked_subcommand:
+        # list apps
+        region = ctx.obj['region']
+        subnet = ctx.obj['subnet']
+        user = ctx.obj['user']
+
+        if not user:
+            raise ValueError('Missing user')
+
+        vpc_conn = boto.vpc.connect_to_region(region)
+        subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
+        vpc = subnet_obj.vpc_id
+
+        conn = boto.ec2.connect_to_region(region)
+
+        all_security_groups = conn.get_all_security_groups()
+        for _sg in all_security_groups:
+            if _sg.name.startswith('app-') and _sg.vpc_id == vpc:
+                click.secho(_sg.name, bold=True)
+                click.secho('{}'.format(_sg.tags['Manifest']))
 
 
-@applications.group(cls=AliasedGroup)
+@applications.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def versions(ctx):
-    pass
+    if not ctx.invoked_subcommand:
+        # list apps
+        region = ctx.obj['region']
+        subnet = ctx.obj['subnet']
+        user = ctx.obj['user']
+
+        if not user:
+            raise ValueError('Missing user')
+
+        vpc_conn = boto.vpc.connect_to_region(region)
+        subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
+        vpc = subnet_obj.vpc_id
+
+        conn = boto.ec2.connect_to_region(region)
+
+        instances = conn.get_only_instances()
+        for instance in instances:
+            if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
+                click.secho('{:<20}'.format(instance.tags['Name']), bold=True, nl=False)
+                click.secho('{:<30}'.format(instance.tags['Team']), nl=False)
+                click.secho('{:<20}'.format(instance.state))
 
 
 @versions.command('create')
@@ -140,68 +179,47 @@ def create_version(ctx, application_name, application_version, docker_image):
 
     conn = boto.ec2.connect_to_region(region)
 
-    sg_name = generate_random_name(user + '-', 6)
+    sg_name = 'app-{}'.format(application_name)
+
+    all_security_groups = conn.get_all_security_groups()
+    exists = False
+    for _sg in all_security_groups:
+        if _sg.name == sg_name and _sg.vpc_id == vpc:
+            print(_sg, _sg.id)
+            exists = True
+            manifest = yaml.safe_load(_sg.tags['Manifest'])
+            sg = _sg
+            # conn.delete_security_group(group_id=sg.id)
+
+    if not exists:
+        raise Exception('Application not found')
+
     key_name = sg_name
-    key = conn.create_key_pair(key_name)
     key_dir = os.path.expanduser('~/.ssh')
-    key.save(key_dir)
-    sg = conn.create_security_group(sg_name, 'Some test group created by ' + user, vpc_id=vpc)
-
-    rules = [
-        SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-        SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
-    ]
-
-    for rule in rules:
-        modify_sg(conn, sg, rule, authorize=True)
 
     interface = boto.ec2.networkinterface.NetworkInterfaceSpecification(subnet_id=subnet,
                                                                         groups=[sg.id],
                                                                         associate_public_ip_address=True)
     interfaces = boto.ec2.networkinterface.NetworkInterfaceCollection(interface)
 
-    init_script = b'''#!/bin/bash
-
-    # use the latest HAProxy with IPv6 support
-    add-apt-repository -y ppa:vbernat/haproxy-1.5
-
+    init_script = '''#!/bin/bash
     # add Docker repo
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
     echo 'deb https://get.docker.io/ubuntu docker main' > /etc/apt/sources.list.d/docker.list
 
     apt-get update
 
-    #vim editor (only temporarily for test setup)
-    apt-get install vim -y
-
-    # system utilities (only temporarily for test setup)
-    apt-get install -y strace tcpdump
-
-    # HAProxy
-    mkdir -p /fakepath
-    ln -fs /bin/true /fakepath/invoke-rc.d
-    PATH=/fakepath:$PATH apt-get install -o Dpkg::Options::="--force-confold" --force-yes -y haproxy
-
     # Docker
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker
 
-    # brctl
-    apt-get install -y --no-install-recommends bridge-utils
-
-    # Python
-    apt-get install -y --no-install-recommends python3-all python3-pip python3-dev python3-setuptools
-    apt-get install -y --no-install-recommends gcc build-essential
-
-    # stupid workaround..
-    pip3 install netifaces==0.10.4
-
-    docker run -d -p 80:80 nginx
-    '''
+    docker run -d -p {exposed_port}:{exposed_port} {docker_image}
+    '''.format(docker_image=docker_image, exposed_port=manifest['exposed_ports'][0])
 
     reservation = conn.run_instances(AMI_ID, instance_type='t2.micro', network_interfaces=interfaces, key_name=key_name,
-                                     user_data=init_script)
+                                     user_data=init_script.encode('utf-8'))
     instance = reservation.instances[0]
-    instance.add_tags({'Name': key_name})
+    instance.add_tags({'Name': 'app-{}-{}'.format(manifest['application_name'], application_version),
+                       'Team': manifest['team_name']})
 
     time.sleep(3)
 
@@ -235,12 +253,14 @@ def create_version(ctx, application_name, application_version, docker_image):
         interval=20,
         healthy_threshold=3,
         unhealthy_threshold=5,
-        target='HTTP:80/'
+        target='HTTP:{}/'.format(manifest['exposed_ports'][0])
     )
 
-    ports = [(80, 80, 'http')]
+    ports = [(manifest['exposed_ports'][0], manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer(key_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
+    lb = elb_conn.create_load_balancer('app-{}-{}'.format(manifest['application_name'],
+                                       application_version.replace('.', '-')), zones=None, listeners=ports,
+                                       subnets=[subnet], security_groups=[sg.id])
     lb.configure_health_check(hc)
     lb.register_instances([instance.id])
 
@@ -261,6 +281,7 @@ def create(ctx, manifest_file):
     print(manifest)
 
     application_name = manifest['application_name']
+    team_name = manifest['team_name']
 
     region = ctx.obj['region']
     subnet = ctx.obj['subnet']
@@ -276,17 +297,35 @@ def create(ctx, manifest_file):
     vpc = subnet_obj.vpc_id
 
     sg_name = 'app-{}'.format(application_name)
+    print(sg_name)
 
-    sg = conn.create_security_group(sg_name, 'Some test group created by ' + user, vpc_id=vpc)
+    key_name = sg_name
+    key = conn.create_key_pair(key_name)
+    key_dir = os.path.expanduser('~/.ssh')
+    key.save(key_dir)
 
-    rules = [
-        SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-        SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
-        SecurityGroupRule("tcp", 443, 80, "0.0.0.0/0", None)
-    ]
+    all_security_groups = conn.get_all_security_groups()
+    exists = False
+    for _sg in all_security_groups:
+        if _sg.name == sg_name and _sg.vpc_id == vpc:
+            print(_sg, _sg.id)
+            exists = True
+            print(yaml.safe_load(_sg.tags['Manifest']))
+            sg = _sg
+            # conn.delete_security_group(group_id=sg.id)
+    if not exists:
+        sg = conn.create_security_group(sg_name, 'Some test group created by ' + user, vpc_id=vpc)
+        # HACK: add manifest as tag
+        sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-    for rule in rules:
-        modify_sg(conn, sg, rule, authorize=True)
+        rules = [
+            SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
+            SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
+            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None)
+        ]
+
+        for rule in rules:
+            modify_sg(conn, sg, rule, authorize=True)
 
     main_port = 80
 
@@ -299,9 +338,10 @@ def create(ctx, manifest_file):
 
     ports = [(main_port, main_port, 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer(application_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
+    lb = elb_conn.create_load_balancer(sg_name, zones=None, listeners=ports, subnets=[subnet], security_groups=[sg.id])
+    # Boto does not support ELB tags (https://github.com/boto/boto/issues/2549)
+    # lb.add_tags({'Manifest': yaml.dump(manifest)})
     lb.configure_health_check(hc)
-
 
 
 def main():
