@@ -1,0 +1,4 @@
+---
+application_name: docker-registry
+team_name: Infrastructure
+exposed_ports: [5000]

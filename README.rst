@@ -83,6 +83,6 @@ Manifest
     accessible_by:
         - my-other-app
         - another-app
-    stateful: false
+    exposed_ports: [80]
 
 
