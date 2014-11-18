@@ -436,7 +436,15 @@ def create(ctx, manifest_file):
     key_name = sg_name
     key = conn.create_key_pair(key_name)
     key_dir = os.path.expanduser('~/.ssh')
-    key.save(key_dir)
+    try:
+        key.save(key_dir)
+    except:
+        # HACK to circumvent missing merge of https://github.com/boto/boto/pull/2758
+        file_path = os.path.join(key_dir, '%s.pem' % key.name)
+        if os.path.exists(file_path):
+            os.unlink(file_path)
+        key.material = key.material.encode('ascii')
+        key.save(key_dir)
     ok()
 
     all_security_groups = conn.get_all_security_groups()
