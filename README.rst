@@ -86,3 +86,8 @@ Manifest
     exposed_ports: [80]
 
 
+ToDos
+=====
+
+* create IAM role for each application (users can configure S3 access for example)
+* maybe create separate security group for EC2 instances and ELB
