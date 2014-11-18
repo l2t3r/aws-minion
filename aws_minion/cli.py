@@ -17,7 +17,7 @@ import time
 import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
-from aws_minion.console import print_table
+from aws_minion.console import print_table, action, ok
 
 AMI_ID = 'ami-f0b11187'
 
@@ -73,11 +73,24 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
-@click.option('--region', help='AWS region ID')
-@click.option('--subnet', help='AWS subnet ID')
-@click.option('--domain', help='DNS domain (e.g. apps.example.org)')
+
 @click.pass_context
-def cli(ctx, region, subnet, domain):
+def cli(ctx):
+    path = os.path.expanduser('~/.aws-minion.yaml')
+    data = {}
+    if os.path.exists(path):
+        with open(path, 'rb') as fd:
+            data = yaml.safe_load(fd)
+    if not data and not 'configure'.startswith(ctx.invoked_subcommand):
+        raise click.UsageError('Please run "minion configure" first.')
+    ctx.obj = data
+
+@cli.command()
+@click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
+@click.option('--subnet', help='AWS subnet ID', prompt='AWS subnet ID')
+@click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
+@click.pass_context
+def configure(ctx, region, subnet, domain):
     param_data = {'region': region, 'subnet': subnet, 'domain': domain}
     path = os.path.expanduser('~/.aws-minion.yaml')
     if os.path.exists(path):
@@ -409,8 +422,6 @@ def create(ctx, manifest_file):
     except Exception as e:
         raise click.UsageError('Failed to parse YAML file: {}'.format(e))
 
-    print(manifest)
-
     application_name = manifest['application_name']
     team_name = manifest['team_name']
 
@@ -424,22 +435,22 @@ def create(ctx, manifest_file):
     vpc = subnet_obj.vpc_id
 
     sg_name = 'app-{}'.format(application_name)
-    print(sg_name)
 
+    action('Creating key pair for application {application_name}..', **vars())
     key_name = sg_name
     key = conn.create_key_pair(key_name)
     key_dir = os.path.expanduser('~/.ssh')
     key.save(key_dir)
+    ok()
 
     all_security_groups = conn.get_all_security_groups()
     exists = False
     for _sg in all_security_groups:
         if _sg.name == sg_name and _sg.vpc_id == vpc:
-            print(_sg, _sg.id)
             exists = True
-            print(yaml.safe_load(_sg.tags['Manifest']))
     if not exists:
-        sg = conn.create_security_group(sg_name, 'Some test group created by ..', vpc_id=vpc)
+        action('Creating security group {sg_name}..', **vars())
+        sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
         # HACK: add manifest as tag
         sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
@@ -451,6 +462,7 @@ def create(ctx, manifest_file):
 
         for rule in rules:
             modify_sg(conn, sg, rule, authorize=True)
+        ok()
 
 
 def main():

@@ -4,40 +4,15 @@ import time
 
 
 STYLES = {
-    'REGISTERED': {'fg': 'green'},
-    'UNKNOWN': {'fg': 'red'},
     'RUNNING': {'fg': 'green'},
-    'START': {'fg': 'white', 'bold': True},
-    'STARTING': {'fg': 'yellow'},
-    'KILL': {'fg': 'white', 'bold': True},
-    'KILLING': {'fg': 'red'},
     'TERMINATED': {'fg': 'red'},
 }
 
 
 TITLES = {
-    'repository_name': 'Repo',
-    'application_version': 'Ver',
-    'zone_name': 'Zone',
-    'lifecycle_phase': 'Status',
-    'memory_mb': 'MB',
-    'cpu_vmhz': 'VMHz',
-    'processes_count': 'Procs',
-    'filehandles_count': 'Files',
-    'instance_started_time': 'Started',
-    'agent_start_time': 'Agent Start',
-    'node_start_time': 'Node Start',
-    'last_update_time': 'Last Update',
-    'template_version': 'Templ.',
-    'service_name': 'Service',
-    'service_version': 'Ver',
-    'load_balancer_configuration_name': 'LB'
-
 }
 
 MAX_COLUMN_WIDTH = {
-    'node_name': 32,
-    'command': 16
 }
 
 
