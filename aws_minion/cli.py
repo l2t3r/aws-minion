@@ -460,8 +460,8 @@ def create(ctx, manifest_file):
 
         rules = [
             SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-            SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
-            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None)
+            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
+            SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
         ]
 
         for rule in rules:
