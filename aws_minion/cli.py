@@ -354,8 +354,8 @@ def create_version(ctx, application_name, application_version, docker_image):
                              image_id=AMI_ID,
                              key_name=key_name,
                              security_groups=[sg.id],
-                             user_data=init_script.encode('utf-8'), instance_type='t2.micro',
-
+                             user_data=init_script.encode('utf-8'),
+                             instance_type=manifest.get('instance_type', 't2.micro'),
                              associate_public_ip_address=True)
     autoscale.create_launch_configuration(lc)
 
