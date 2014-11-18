@@ -72,6 +72,24 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
                      src_group=src_group)
 
 
+class ApplicationNotFound(Exception):
+    def __init__(self, application_name):
+        self.application_name = application_name
+
+    def __str__(self):
+        return 'Application "{}" does not exist'.format(self.application_name)
+
+
+def get_app_security_group_manifest(conn, application_name: str):
+    all_security_groups = conn.get_all_security_groups()
+    sg_name = 'app-{}'.format(application_name)
+    for _sg in all_security_groups:
+        if _sg.name == sg_name:
+            manifest = yaml.safe_load(_sg.tags['Manifest'])
+            return _sg, manifest
+    raise ApplicationNotFound(application_name)
+
+
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.pass_context
 def cli(ctx):
@@ -186,26 +204,14 @@ def activate(ctx, application_name, application_version):
     Activate a single application version (put it into the non-versioned LB)
     """
     region = ctx.obj['region']
-    subnet = ctx.obj['subnet']
     domain = ctx.obj['domain']
 
     if not domain:
         raise ValueError('Missing DNS domain setting')
 
-    vpc_conn = boto.vpc.connect_to_region(region)
-    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
-    vpc = subnet_obj.vpc_id
-
     conn = boto.ec2.connect_to_region(region)
 
-    sg_name = 'app-{}'.format(application_name)
-
-    all_security_groups = conn.get_all_security_groups()
-    manifest = None
-    for _sg in all_security_groups:
-        if _sg.name == sg_name and _sg.vpc_id == vpc:
-            print(_sg, _sg.id)
-            manifest = yaml.safe_load(_sg.tags['Manifest'])
+    sg, manifest = get_app_security_group_manifest(conn, application_name)
 
     if not manifest:
         raise Exception('Application not found')
@@ -246,25 +252,10 @@ def scale(ctx, application_name, application_version, desired_instances):
     Scale an application version (set desired instance count)
     """
     region = ctx.obj['region']
-    subnet = ctx.obj['subnet']
-
-    vpc_conn = boto.vpc.connect_to_region(region)
-    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
-    vpc = subnet_obj.vpc_id
 
     conn = boto.ec2.connect_to_region(region)
 
-    sg_name = 'app-{}'.format(application_name)
-
-    all_security_groups = conn.get_all_security_groups()
-    manifest = None
-    for _sg in all_security_groups:
-        if _sg.name == sg_name and _sg.vpc_id == vpc:
-            print(_sg, _sg.id)
-            manifest = yaml.safe_load(_sg.tags['Manifest'])
-
-    if not manifest:
-        raise Exception('Application not found')
+    sg, manifest = get_app_security_group_manifest(conn, application_name)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
     groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
@@ -287,25 +278,10 @@ def delete_version(ctx, application_name, application_version):
     Delete an application version and shutdown all associated instances
     """
     region = ctx.obj['region']
-    subnet = ctx.obj['subnet']
-
-    vpc_conn = boto.vpc.connect_to_region(region)
-    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
-    vpc = subnet_obj.vpc_id
 
     conn = boto.ec2.connect_to_region(region)
 
-    sg_name = 'app-{}'.format(application_name)
-
-    all_security_groups = conn.get_all_security_groups()
-    manifest = None
-    for _sg in all_security_groups:
-        if _sg.name == sg_name and _sg.vpc_id == vpc:
-            print(_sg, _sg.id)
-            manifest = yaml.safe_load(_sg.tags['Manifest'])
-
-    if not manifest:
-        raise Exception('Application not found')
+    sg, manifest = get_app_security_group_manifest(conn, application_name)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
     groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
@@ -348,23 +324,12 @@ def create_version(ctx, application_name, application_version, docker_image):
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
-    vpc = subnet_obj.vpc_id
 
     conn = boto.ec2.connect_to_region(region)
 
     sg_name = 'app-{}'.format(application_name)
 
-    all_security_groups = conn.get_all_security_groups()
-    exists = False
-    for _sg in all_security_groups:
-        if _sg.name == sg_name and _sg.vpc_id == vpc:
-            print(_sg, _sg.id)
-            exists = True
-            manifest = yaml.safe_load(_sg.tags['Manifest'])
-            sg = _sg
-
-    if not exists:
-        raise Exception('Application not found')
+    sg, manifest = get_app_security_group_manifest(conn, application_name)
 
     key_name = sg_name
 
