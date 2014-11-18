@@ -255,24 +255,21 @@ def activate(ctx, application_name, application_version):
     if not groups:
         raise Exception('Autoscaling group for application version not found')
 
-    group = groups[0]
-
-    print(group, group.load_balancers)
-    print(group.instances)
-
     elb_conn = boto.ec2.elb.connect_to_region(region)
 
+    action('Add CNAME record..')
     dns_conn = boto.route53.connect_to_region(region)
     zone = dns_conn.get_zone(domain + '.')
     dns_name = '{}.{}.'.format(application_name, domain)
     rr = zone.get_records()
-    print(rr)
 
     lb = elb_conn.get_all_load_balancers(
         load_balancer_names=['app-{}-{}'.format(application_name, application_version.replace('.', '-'))])[0]
 
     change = rr.add_change('UPSERT', dns_name, 'CNAME', ttl=60, weight=1)
     change.add_value(lb.dns_name)
+    rr.commit()
+    ok()
 
 
 @versions.command()
