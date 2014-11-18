@@ -350,7 +350,8 @@ def create_version(ctx, application_name, application_version, docker_image):
 
     vpc_info = ','.join([subnet])
 
-    lc = LaunchConfiguration(name='app-{}-{}'.format(manifest['application_name'], application_version),
+    action('Creating launch configuration for {application_name} version {application_version}..', **vars())
+    lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
                              image_id=AMI_ID,
                              key_name=key_name,
                              security_groups=[sg.id],
@@ -358,6 +359,7 @@ def create_version(ctx, application_name, application_version, docker_image):
                              instance_type=manifest.get('instance_type', 't2.micro'),
                              associate_public_ip_address=True)
     autoscale.create_launch_configuration(lc)
+    ok()
 
     hc = HealthCheck(
         interval=20,
@@ -366,6 +368,7 @@ def create_version(ctx, application_name, application_version, docker_image):
         target='HTTP:{}/'.format(manifest['exposed_ports'][0])
     )
 
+    action('Creating load blanacer for {application_name} version {application_version}..', **vars())
     ports = [(manifest['exposed_ports'][0], manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
     lb = elb_conn.create_load_balancer('app-{}-{}'.format(manifest['application_name'],
@@ -373,9 +376,11 @@ def create_version(ctx, application_name, application_version, docker_image):
                                        listeners=ports,
                                        subnets=[subnet], security_groups=[sg.id])
     lb.configure_health_check(hc)
+    ok()
 
     group_name = 'app-{}-{}'.format(manifest['application_name'], application_version)
 
+    action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
                           load_balancers=[
                               'app-{}-{}'.format(manifest['application_name'], application_version.replace('.', '-'))],
@@ -395,6 +400,7 @@ def create_version(ctx, application_name, application_version, docker_image):
     autoscale.create_or_update_tags(tags)
 
     ag.set_capacity(1)
+    ok()
 
 
 @applications.command()
