@@ -10,6 +10,7 @@ STYLES = {
 
 
 TITLES = {
+    'application_version': 'Ver.'
 }
 
 MAX_COLUMN_WIDTH = {

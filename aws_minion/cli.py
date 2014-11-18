@@ -186,6 +186,8 @@ def applications(ctx):
                 rows.append({k: str(v) for k, v in manifest.items()})
         print_table('application_name team_name exposed_ports stateful'.split(), rows)
 
+PREFIX = 'app-'
+
 
 @applications.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
@@ -201,11 +203,24 @@ def versions(ctx):
         groups = autoscale.get_all_groups()
         rows = []
         for group in groups:
-            if group.name.startswith('app-'):
-                rows.append({'application_version': group.name, 'instances': len(group.instances),
+            if group.name.startswith(PREFIX):
+                # TODO: version MUST NOT contain any dash "-"
+                application_name, application_version = group.name[len(PREFIX):].rsplit('-', 1)
+
+                elb_conn = boto.ec2.elb.connect_to_region(region)
+
+                lb = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])[0]
+
+                counter = collections.Counter(i.state for i in lb.get_instance_health())
+
+                instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
+
+                rows.append({'application_name': application_name,
+                             'application_version': application_version,
+                             'instance_states': instance_states,
                              'created_time': datetime.datetime.strptime(
                                  group.created_time, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()})
-        print_table('application_version instances created_time'.split(), rows)
+        print_table('application_name application_version instance_states created_time'.split(), rows)
 
 
 @applications.group(cls=AliasedGroup, invoke_without_command=True)
@@ -287,6 +302,8 @@ def scale(ctx, application_name, application_version, desired_instances):
 
     sg, manifest = get_app_security_group_manifest(conn, application_name)
 
+    action('Scaling application {application_name} version {application_version} to {desired_instances} instances',
+           **vars())
     autoscale = boto.ec2.autoscale.connect_to_region(region)
     groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
 
@@ -296,6 +313,7 @@ def scale(ctx, application_name, application_version, desired_instances):
     group = groups[0]
 
     group.set_capacity(desired_instances)
+    ok()
 
 
 @versions.command('delete')
