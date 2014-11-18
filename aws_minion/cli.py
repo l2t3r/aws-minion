@@ -438,7 +438,7 @@ def create(ctx, manifest_file):
     key_dir = os.path.expanduser('~/.ssh')
     try:
         key.save(key_dir)
-    except:
+    except TypeError:
         # HACK to circumvent missing merge of https://github.com/boto/boto/pull/2758
         file_path = os.path.join(key_dir, '%s.pem' % key.name)
         if os.path.exists(file_path):
