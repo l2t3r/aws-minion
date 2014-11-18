@@ -25,6 +25,7 @@ You can run the tool from source or with the installed console script:
 
 .. code-block:: bash
 
+    $ pip3 install -r requirements.txt
     $ python3 -m aws_minion # run from source
     $ minion ...            # run installed console script
 
