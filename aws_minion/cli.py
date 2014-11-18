@@ -17,7 +17,7 @@ import time
 import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
-from aws_minion.console import print_table, action, ok
+from aws_minion.console import print_table, action, ok, error
 
 AMI_ID = 'ami-f0b11187'
 
@@ -73,7 +73,6 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
-
 @click.pass_context
 def cli(ctx):
     path = os.path.expanduser('~/.aws-minion.yaml')
@@ -84,6 +83,7 @@ def cli(ctx):
     if not data and not 'configure'.startswith(ctx.invoked_subcommand):
         raise click.UsageError('Please run "minion configure" first.')
     ctx.obj = data
+
 
 @cli.command()
 @click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
@@ -101,6 +101,29 @@ def configure(ctx, region, subnet, domain):
     for k, v in param_data.items():
         if v:
             data[k] = v
+
+    action('Connecting to region {region}..', **vars())
+    vpc_conn = boto.vpc.connect_to_region(region)
+    if not vpc_conn:
+        error('FAILED')
+        return
+    ok()
+
+    action('Checking subnet {subnet}..', **vars())
+    subnets = vpc_conn.get_all_subnets(subnet_ids=[subnet])
+    if not subnets:
+        error('FAILED')
+        return
+    ok()
+
+    action('Checking domain {domain}..', **vars())
+    dns_conn = boto.route53.connect_to_region(region)
+    zone = dns_conn.get_zone(domain + '.')
+    if not zone:
+        error('FAILED')
+        return
+    ok()
+
     with open(path, 'w', encoding='utf-8') as fd:
         fd.write(yaml.dump(data))
     ctx.obj = data
