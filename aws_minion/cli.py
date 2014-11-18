@@ -14,6 +14,7 @@ import collections
 import os
 import random
 import time
+import datetime
 import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
@@ -184,9 +185,29 @@ def versions(ctx):
         # list apps
         region = ctx.obj['region']
 
+        autoscale = boto.ec2.autoscale.connect_to_region(region)
+        groups = autoscale.get_all_groups()
+        rows = []
+        for group in groups:
+            if group.name.startswith('app-'):
+                rows.append({'application_version': group.name, 'instances': len(group.instances),
+                             'created_time': datetime.datetime.strptime(
+                                 group.created_time, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()})
+        print_table('application_version instances created_time'.split(), rows)
+
+
+@applications.group(cls=AliasedGroup, invoke_without_command=True)
+@click.pass_context
+def instances(ctx):
+    """
+    Manage application instances, list all instances
+    """
+    if not ctx.invoked_subcommand:
+        # list apps
+        region = ctx.obj['region']
+
         conn = boto.ec2.connect_to_region(region)
 
-        # TODO: should list auto scaling groups instead of instances
         instances = conn.get_only_instances()
         rows = []
         for instance in instances:
