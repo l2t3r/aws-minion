@@ -237,9 +237,6 @@ def activate(ctx, application_name, application_version):
 
     sg, manifest = get_app_security_group_manifest(conn, application_name)
 
-    if not manifest:
-        raise Exception('Application not found')
-
     autoscale = boto.ec2.autoscale.connect_to_region(region)
     groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
 
