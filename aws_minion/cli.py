@@ -57,14 +57,12 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
         src_group = c.get_all_security_groups([rule.src_group_name])[0]
 
     if authorize and not revoke:
-        print("Authorizing missing rule %s..." % (rule,))
         group.authorize(ip_protocol=rule.ip_protocol,
                         from_port=rule.from_port,
                         to_port=rule.to_port,
                         cidr_ip=rule.cidr_ip,
                         src_group=src_group)
     elif not authorize and revoke:
-        print("Revoking unexpected rule %s..." % (rule,))
         group.revoke(ip_protocol=rule.ip_protocol,
                      from_port=rule.from_port,
                      to_port=rule.to_port,
@@ -109,6 +107,9 @@ def cli(ctx):
 @click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
 @click.pass_context
 def configure(ctx, region, subnet, domain):
+    """
+    Configure the AWS connection settings
+    """
     param_data = {'region': region, 'subnet': subnet, 'domain': domain}
     path = os.path.expanduser('~/.aws-minion.yaml')
     if os.path.exists(path):
@@ -265,7 +266,6 @@ def scale(ctx, application_name, application_version, desired_instances):
 
     group = groups[0]
 
-    print(group, group.load_balancers)
     group.set_capacity(desired_instances)
 
 
@@ -417,6 +417,14 @@ def create(ctx, manifest_file):
     subnet = ctx.obj['subnet']
 
     conn = boto.ec2.connect_to_region(region)
+
+    action('Checking whether application {application_name} exists..', **vars())
+    try:
+        sg, manifest = get_app_security_group_manifest(conn, application_name)
+        error('ALREADY EXISTS, ABORTING')
+        return
+    except ApplicationNotFound:
+        ok()
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
