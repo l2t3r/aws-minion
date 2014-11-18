@@ -122,6 +122,18 @@ def configure(ctx, region, subnet, domain):
         if v:
             data[k] = v
 
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    if not os.path.exists(credentials_path):
+        click.secho('AWS credentials file not found, please provide them now')
+        key_id = click.prompt('AWS Access Key ID')
+        secret = click.prompt('AWS Secret Access Key', hide_input=True)
+        os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
+        with open(credentials_path, 'w') as fd:
+            fd.write('''[default]
+aws_access_key_id = {key_id}
+aws_secret_access_key = {secret}
+'''.format(key_id=key_id, secret=secret))
+
     action('Connecting to region {region}..', **vars())
     vpc_conn = boto.vpc.connect_to_region(region)
     if not vpc_conn:
