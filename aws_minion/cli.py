@@ -215,6 +215,9 @@ def versions(ctx):
 
                 instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
 
+                if not instance_states:
+                    instance_states = '(no instances)'
+
                 rows.append({'application_name': application_name,
                              'application_version': application_version,
                              'instance_states': instance_states,
