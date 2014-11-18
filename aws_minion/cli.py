@@ -213,8 +213,10 @@ def instances(ctx):
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
                 rows.append({'application_version': instance.tags['Name'], 'instance_id': instance.id,
-                             'team': instance.tags.get('Team', ''), 'state': instance.state.upper()})
-        print_table('application_version instance_id team state'.split(), rows)
+                             'team': instance.tags.get('Team', ''),
+                             'ip_address': instance.ip_address,
+                             'state': instance.state.upper()})
+        print_table('application_version instance_id team ip_address state'.split(), rows)
 
 
 @versions.command()
