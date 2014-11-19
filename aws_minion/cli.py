@@ -222,11 +222,10 @@ def versions(ctx):
 
                 elb_conn = boto.ec2.elb.connect_to_region(region)
 
-                lbs = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])
-                if lbs:
-                    lb = lbs[0]
+                try:
+                    lb = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])[0]
                     counter = collections.Counter(i.state for i in lb.get_instance_health())
-                else:
+                except:
                     counter = collections.Counter()
 
                 instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
@@ -373,7 +372,16 @@ def delete_version(ctx, application_name: str, application_version: str):
         click.secho(' .', nl=False)
     ok()
 
-    group.delete()
+    action('Deleting auto scaling group..')
+    while True:
+        try:
+            group.delete()
+            break
+        except:
+            # You cannot delete an AutoScalingGroup while there are scaling activities in progress for that group.
+            time.sleep(3)
+            click.secho(' .', nl=False)
+    ok()
 
     lcs = autoscale.get_all_launch_configurations(
         names=['app-{}-{}'.format(application_name, application_version)])
