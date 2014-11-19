@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import shlex
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
@@ -208,6 +209,10 @@ def versions(ctx):
                 # TODO: version MUST NOT contain any dash "-"
                 application_name, application_version = group.name[len(PREFIX):].rsplit('-', 1)
 
+                tags = {}
+                for tag in group.tags:
+                    tags[tag.key] = tag.value
+
                 elb_conn = boto.ec2.elb.connect_to_region(region)
 
                 lb = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])[0]
@@ -221,10 +226,11 @@ def versions(ctx):
 
                 rows.append({'application_name': application_name,
                              'application_version': application_version,
+                             'docker_image': tags.get('DockerImage'),
                              'instance_states': instance_states,
                              'created_time': datetime.datetime.strptime(
                                  group.created_time, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()})
-        print_table('application_name application_version instance_states created_time'.split(), rows)
+        print_table('application_name application_version docker_image instance_states created_time'.split(), rows)
 
 
 @applications.group(cls=AliasedGroup, invoke_without_command=True)
@@ -296,7 +302,7 @@ def activate(ctx, application_name, application_version):
 @click.argument('application-version')
 @click.argument('desired-instances', type=int)
 @click.pass_context
-def scale(ctx, application_name, application_version, desired_instances):
+def scale(ctx, application_name, application_version, desired_instances: int):
     """
     Scale an application version (set desired instance count)
     """
@@ -324,7 +330,7 @@ def scale(ctx, application_name, application_version, desired_instances):
 @click.argument('application-name')
 @click.argument('application-version')
 @click.pass_context
-def delete_version(ctx, application_name, application_version):
+def delete_version(ctx, application_name: str, application_version: str):
     """
     Delete an application version and shutdown all associated instances
     """
@@ -361,12 +367,34 @@ def delete_version(ctx, application_name, application_version):
         lc.delete()
 
 
+def generate_env_options(env_vars: dict):
+    """
+    Generate Docker env options (-e) for a given dictionary
+
+    >>> generate_env_options({})
+    ''
+
+    >>> generate_env_options({'a': 1})
+    '-e a=1'
+
+    >>> generate_env_options({'a': '; rm -fr'})
+    "-e 'a=; rm -fr'"
+    """
+    options = []
+    for key, value in sorted(env_vars.items()):
+        options.append('-e')
+        options.append(shlex.quote('{}={}'.format(key, value)))
+
+    return ' '.join(options)
+
+
 @versions.command('create')
 @click.argument('application-name')
 @click.argument('application-version')
 @click.argument('docker-image')
+@click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
 @click.pass_context
-def create_version(ctx, application_name, application_version, docker_image):
+def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list):
     """
     Create a new application version
     """
@@ -382,6 +410,12 @@ def create_version(ctx, application_name, application_version, docker_image):
 
     sg, manifest = get_app_security_group_manifest(conn, application_name)
 
+    env_vars = {}
+
+    for key_value in env:
+        key, value = key_value.split('=', 1)
+        env_vars[key] = value
+
     key_name = sg_name
 
     init_script = '''#!/bin/bash
@@ -394,8 +428,10 @@ def create_version(ctx, application_name, application_version, docker_image):
     # Docker
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker
 
-    docker run -d -p {exposed_port}:{exposed_port} {docker_image}
-    '''.format(docker_image=docker_image, exposed_port=manifest['exposed_ports'][0])
+    docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image}
+    '''.format(docker_image=docker_image,
+               exposed_port=manifest['exposed_ports'][0],
+               env_options=generate_env_options(env_vars))
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
@@ -446,6 +482,9 @@ def create_version(ctx, application_name, application_version, docker_image):
                                        resource_id=group_name,
                                        propagate_at_launch=True),
             boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Team', value=manifest['team_name'],
+                                       resource_id=group_name,
+                                       propagate_at_launch=True),
+            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='DockerImage', value=docker_image,
                                        resource_id=group_name,
                                        propagate_at_launch=True)
             ]
@@ -537,7 +576,7 @@ def create(ctx, manifest_file):
 @applications.command()
 @click.argument('application-name')
 @click.pass_context
-def delete(ctx, application_name):
+def delete(ctx, application_name: str):
     """
     Delete an application
     """

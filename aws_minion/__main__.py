@@ -1,3 +1,4 @@
 import aws_minion.cli
 
-aws_minion.cli.main()
+if __name__ == '__main__':
+    aws_minion.cli.main()
