@@ -258,7 +258,6 @@ def instances(ctx):
         rows = []
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
-                print(instance.launch_time)
                 rows.append({'application_version': instance.tags['Name'], 'instance_id': instance.id,
                              'team': instance.tags.get('Team', ''),
                              'ip_address': instance.ip_address,
@@ -418,8 +417,9 @@ def generate_env_options(env_vars: dict):
 @click.argument('application-version')
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
+@click.option('--log-url', help='Optional Loggly url (e.g. http://logs-01.loggly.com/inputs/MYTOK/tag/MYTAG)')
 @click.pass_context
-def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list):
+def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, log_url: str):
     """
     Create a new application version
     """
@@ -443,6 +443,28 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     key_name = sg_name
 
+    log_shipper_script = '''#!/usr/bin/env python3
+import time, subprocess, select, glob, urllib.request, sys
+
+if len(sys.argv) < 2:
+    print('Missing LOG_URL argument.')
+    sys.exit(1)
+
+fns = glob.glob('/var/lib/docker/containers/*/*.log')
+while not fns:
+    time.sleep(3)
+    fns = glob.glob('/var/lib/docker/containers/*/*.log')
+
+filename = fns[0]
+f = subprocess.Popen(['tail', '-F', filename], stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+p = select.poll()
+p.register(f.stdout)
+while True:
+    if p.poll(1):
+        urllib.request.urlopen(sys.argv[1], f.stdout.readline().strip())
+    time.sleep(1)
+'''
+
     init_script = '''#!/bin/bash
     # add Docker repo
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
@@ -454,9 +476,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker
 
     docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image}
+
+    echo "{log_shipper_script}" > /tmp/log-shipper.py
+    python3 /tmp/log-shipper.py {log_url}
     '''.format(docker_image=docker_image,
                exposed_port=manifest['exposed_ports'][0],
-               env_options=generate_env_options(env_vars))
+               env_options=generate_env_options(env_vars),
+               log_shipper_script=log_shipper_script,
+               log_url=log_url or '')
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
