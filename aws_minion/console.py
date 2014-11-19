@@ -10,7 +10,8 @@ STYLES = {
 
 
 TITLES = {
-    'application_version': 'Ver.'
+    'application_version': 'Ver.',
+    'desired_capacity': 'Desired#'
 }
 
 MAX_COLUMN_WIDTH = {

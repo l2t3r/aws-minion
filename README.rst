@@ -42,8 +42,8 @@ Example run:
 
     $ minion configure
     $ minion app create examples/myapp.yaml
-    $ minion app ver create myapp 0.1 nginx
-    $ minion app ver activate myapp 0.1
+    $ minion ver create myapp 0.1 nginx
+    $ minion ver activate myapp 0.1
 
 
 CLI
@@ -62,12 +62,12 @@ Workflow
   * Registers application in registry (if there, right now storing manifest in tag on security group)
 
 * Push Docker image to your favorite Docker registry
-* Register application version ``minion app[lications] ver[sions] create my-app 0.1 hjacobs/my-app`` (this would use Docker Hub)
+* Register application version ``minion ver[sions] create my-app 0.1 hjacobs/my-app`` (this would use Docker Hub)
 
   * Create autoscaling group and ELB
   * Start at least one instance (without getting traffic)
 
-* ``minion app[lications] ver[sions] activate my-app 0.1``
+* ``minion ver[sions] activate my-app 0.1``
 
   * Update DNS to point to version LB
 

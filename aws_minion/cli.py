@@ -186,6 +186,7 @@ def applications(ctx):
             if _sg.name.startswith('app-') and _sg.vpc_id == vpc:
                 manifest = yaml.safe_load(_sg.tags['Manifest'])
                 rows.append({k: str(v) for k, v in manifest.items()})
+        rows.sort(key=lambda x: (x['application_name']))
         print_table('application_name team_name exposed_ports stateful'.split(), rows)
 
 PREFIX = 'app-'
@@ -193,12 +194,13 @@ PREFIX = 'app-'
 
 def parse_time(s: str) -> float:
     try:
-        return datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()
+        utc = datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()
+        return utc - time.timezone
     except:
         return None
 
 
-@applications.group(cls=AliasedGroup, invoke_without_command=True)
+@cli.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def versions(ctx):
     """
@@ -237,11 +239,20 @@ def versions(ctx):
                              'application_version': application_version,
                              'docker_image': tags.get('DockerImage'),
                              'instance_states': instance_states,
+                             'desired_capacity': group.desired_capacity,
                              'created_time': parse_time(group.created_time)})
-        print_table('application_name application_version docker_image instance_states created_time'.split(), rows)
+
+        rows.sort(key=lambda x: (x['application_name'], x['application_version']))
+        print_table(('application_name application_version ' +
+                    'docker_image instance_states desired_capacity created_time').split(), rows)
 
 
-@applications.group(cls=AliasedGroup, invoke_without_command=True)
+def parse_instance_name(name: str) -> tuple:
+    application_name, application_version = name[len(PREFIX):].rsplit('-', 1)
+    return application_name, application_version
+
+
+@cli.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def instances(ctx):
     """
@@ -257,12 +268,17 @@ def instances(ctx):
         rows = []
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
-                rows.append({'application_version': instance.tags['Name'], 'instance_id': instance.id,
+                application_name, application_version = parse_instance_name(instance.tags['Name'])
+                rows.append({'application_name': application_name,
+                             'application_version': application_version,
+                             'instance_id': instance.id,
                              'team': instance.tags.get('Team', ''),
                              'ip_address': instance.ip_address,
                              'state': instance.state.upper(),
                              'launch_time': parse_time(instance.launch_time)})
-        print_table('application_version instance_id team ip_address state launch_time'.split(), rows)
+        now = time.time()
+        rows.sort(key=lambda x: (x['application_name'], x['application_version'], now - x['launch_time']))
+        print_table('application_name application_version instance_id team ip_address state launch_time'.split(), rows)
 
 
 @versions.command()
