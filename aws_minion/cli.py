@@ -191,6 +191,13 @@ def applications(ctx):
 PREFIX = 'app-'
 
 
+def parse_time(s: str) -> float:
+    try:
+        return datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()
+    except:
+        return None
+
+
 @applications.group(cls=AliasedGroup, invoke_without_command=True)
 @click.pass_context
 def versions(ctx):
@@ -231,8 +238,7 @@ def versions(ctx):
                              'application_version': application_version,
                              'docker_image': tags.get('DockerImage'),
                              'instance_states': instance_states,
-                             'created_time': datetime.datetime.strptime(
-                                 group.created_time, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()})
+                             'created_time': parse_time(group.created_time).timestamp()})
         print_table('application_name application_version docker_image instance_states created_time'.split(), rows)
 
 
@@ -252,11 +258,13 @@ def instances(ctx):
         rows = []
         for instance in instances:
             if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
+                print(instance.launch_time)
                 rows.append({'application_version': instance.tags['Name'], 'instance_id': instance.id,
                              'team': instance.tags.get('Team', ''),
                              'ip_address': instance.ip_address,
-                             'state': instance.state.upper()})
-        print_table('application_version instance_id team ip_address state'.split(), rows)
+                             'state': instance.state.upper(),
+                             'launch_time': parse_time(instance.launch_time)})
+        print_table('application_version instance_id team ip_address state launch_time'.split(), rows)
 
 
 @versions.command()
