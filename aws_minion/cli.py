@@ -106,14 +106,14 @@ def cli(ctx):
 
 @cli.command()
 @click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
-@click.option('--subnet', help='AWS subnet ID', prompt='AWS subnet ID')
+@click.option('--vpc', help='AWS VPC ID', prompt='AWS VPC ID')
 @click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
 @click.pass_context
-def configure(ctx, region, subnet, domain):
+def configure(ctx, region, vpc, domain):
     """
     Configure the AWS connection settings
     """
-    param_data = {'region': region, 'subnet': subnet, 'domain': domain}
+    param_data = {'region': region, 'vpc': vpc, 'domain': domain}
     path = os.path.expanduser('~/.aws-minion.yaml')
     if os.path.exists(path):
         with open(path, 'rb') as fd:
@@ -143,8 +143,8 @@ aws_secret_access_key = {secret}
         return
     ok()
 
-    action('Checking subnet {subnet}..', **vars())
-    subnets = vpc_conn.get_all_subnets(subnet_ids=[subnet])
+    action('Checking VPC {vpc}..', **vars())
+    subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
     if not subnets:
         error('FAILED')
         return
@@ -172,11 +172,7 @@ def applications(ctx):
     if not ctx.invoked_subcommand:
         # list apps
         region = ctx.obj['region']
-        subnet = ctx.obj['subnet']
-
-        vpc_conn = boto.vpc.connect_to_region(region)
-        subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
-        vpc = subnet_obj.vpc_id
+        vpc = ctx.obj['vpc']
 
         conn = boto.ec2.connect_to_region(region)
 
@@ -259,15 +255,15 @@ def instances(ctx):
     Manage application instances, list all instances
     """
     if not ctx.invoked_subcommand:
-        # list apps
         region = ctx.obj['region']
+        vpc = ctx.obj['vpc']
 
         conn = boto.ec2.connect_to_region(region)
 
         instances = conn.get_only_instances()
         rows = []
         for instance in instances:
-            if 'Name' in instance.tags and instance.tags['Name'].startswith('app-'):
+            if 'Name' in instance.tags and instance.tags['Name'].startswith('app-') and instance.vpc_id == vpc:
                 application_name, application_version = parse_instance_name(instance.tags['Name'])
                 rows.append({'application_name': application_name,
                              'application_version': application_version,
@@ -448,10 +444,10 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     Create a new application version
     """
     region = ctx.obj['region']
-    subnet = ctx.obj['subnet']
+    vpc = ctx.obj['vpc']
 
     vpc_conn = boto.vpc.connect_to_region(region)
-    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
+    subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
 
     conn = boto.ec2.connect_to_region(region)
 
@@ -511,7 +507,7 @@ while True:
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
-    vpc_info = ','.join([subnet])
+    vpc_info = ','.join([id for subnet in subnets])
 
     action('Creating launch configuration for {application_name} version {application_version}..', **vars())
     lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
@@ -538,7 +534,7 @@ while True:
     lb = elb_conn.create_load_balancer('app-{}-{}'.format(manifest['application_name'],
                                                           application_version.replace('.', '-')), zones=None,
                                        listeners=ports,
-                                       subnets=[subnet], security_groups=[sg.id])
+                                       subnets=[subnet.id for subnet in subnets], security_groups=[sg.id])
     lb.configure_health_check(hc)
     ok()
 
@@ -548,7 +544,7 @@ while True:
     ag = AutoScalingGroup(group_name=group_name,
                           load_balancers=[
                               'app-{}-{}'.format(manifest['application_name'], application_version.replace('.', '-'))],
-                          availability_zones=[subnet_obj.availability_zone],
+                          availability_zones=[subnet.availability_zone for subnet in subnets],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
                           connection=autoscale)
@@ -587,7 +583,7 @@ def create(ctx, manifest_file):
     team_name = manifest['team_name']
 
     region = ctx.obj['region']
-    subnet = ctx.obj['subnet']
+    vpc = ctx.obj['vpc']
 
     conn = boto.ec2.connect_to_region(region)
 
@@ -598,10 +594,6 @@ def create(ctx, manifest_file):
         return
     except ApplicationNotFound:
         ok()
-
-    vpc_conn = boto.vpc.connect_to_region(region)
-    subnet_obj = vpc_conn.get_all_subnets(subnet_ids=[subnet])[0]
-    vpc = subnet_obj.vpc_id
 
     sg_name = 'app-{}'.format(application_name)
 

@@ -29,10 +29,10 @@ You can run the tool from source or with the installed console script:
     $ python3 -m aws_minion # run from source
     $ minion ...            # run installed console script
 
-You need to configure the AWS region, the AWS subnet and the route53 domain before using the tool.
+You need to configure the AWS region, the AWS VPC and the Route 53 domain before using the tool.
 
 * Create a new VPC in your AWS account.
-* Create one or more subnets in the VPC.
+* Create one or more subnets in the VPC (the VPC wizard does this automatically).
 * Configure a new hosted zone/domain (e.g. "apps.example.org") in Route 53.
 
 
