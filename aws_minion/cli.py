@@ -507,7 +507,7 @@ while True:
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
-    vpc_info = ','.join([id for subnet in subnets])
+    vpc_info = ','.join([subnet.id for subnet in subnets])
 
     action('Creating launch configuration for {application_name} version {application_version}..', **vars())
     lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
