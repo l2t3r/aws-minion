@@ -215,9 +215,12 @@ def versions(ctx):
 
                 elb_conn = boto.ec2.elb.connect_to_region(region)
 
-                lb = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])[0]
-
-                counter = collections.Counter(i.state for i in lb.get_instance_health())
+                lbs = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])
+                if lbs:
+                    lb = lbs[0]
+                    counter = collections.Counter(i.state for i in lb.get_instance_health())
+                else:
+                    counter = collections.Counter()
 
                 instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
 
@@ -341,30 +344,44 @@ def delete_version(ctx, application_name: str, application_version: str):
     sg, manifest = get_app_security_group_manifest(conn, application_name)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(application_name, application_version)])
 
     if not groups:
         raise Exception('Autoscaling group for application version not found')
 
     group = groups[0]
 
-    print([i.__dict__ for i in group.instances])
+    running_instance_ids = set([i.instance_id for i in group.instances])
+
+    action('Shutting down {instance_count} instances..', instance_count=len(running_instance_ids))
     group.shutdown_instances()
 
     # wait for shutdown
-    while [instance for instance in group.instances if instance.lifecycle_state.lower() not in ('terminated',)]:
-        print(group.instances)
-        # TODO: this does not work
-        group.update()
+    while running_instance_ids:
+        instances = conn.get_only_instances(instance_ids=list(running_instance_ids))
+        for instance in instances:
+            if instance.state.lower() == 'terminated':
+                running_instance_ids.remove(instance.id)
         time.sleep(3)
+        click.secho(' .', nl=False)
+    ok()
 
     group.delete()
 
     lcs = autoscale.get_all_launch_configurations(
-        names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+        names=['app-{}-{}'.format(application_name, application_version)])
 
     for lc in lcs:
         lc.delete()
+
+    action('Deleting load balancer..')
+    elb_conn = boto.ec2.elb.connect_to_region(region)
+    lbs = elb_conn.get_all_load_balancers(load_balancer_names='app-{}-{}'.format(application_name,
+                                                                                 application_version.replace('.', '-')))
+
+    for lb in lbs:
+        lb.delete()
+    ok()
 
 
 def generate_env_options(env_vars: dict):
