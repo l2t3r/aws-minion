@@ -222,8 +222,10 @@ def versions(ctx):
 
                 try:
                     lb = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])[0]
+                    dns_name = lb.dns_name
                     counter = collections.Counter(i.state for i in lb.get_instance_health())
                 except:
+                    dns_name = ''
                     counter = collections.Counter()
 
                 instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
@@ -236,6 +238,7 @@ def versions(ctx):
                              'docker_image': tags.get('DockerImage'),
                              'instance_states': instance_states,
                              'desired_capacity': group.desired_capacity,
+                             'dns_name': dns_name,
                              'created_time': parse_time(group.created_time)})
 
         rows.sort(key=lambda x: (x['application_name'], x['application_version']))
