@@ -238,7 +238,7 @@ def versions(ctx):
                              'application_version': application_version,
                              'docker_image': tags.get('DockerImage'),
                              'instance_states': instance_states,
-                             'created_time': parse_time(group.created_time).timestamp()})
+                             'created_time': parse_time(group.created_time)})
         print_table('application_name application_version docker_image instance_states created_time'.split(), rows)
 
 
