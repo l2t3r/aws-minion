@@ -3,6 +3,7 @@ import boto.vpc
 import boto.ec2
 import boto.ec2.elb
 import boto.ec2.autoscale
+import boto.iam
 import boto.route53
 from boto.ec2.autoscale import LaunchConfiguration
 from boto.ec2.autoscale import AutoScalingGroup
@@ -407,6 +408,7 @@ def create_version(ctx, application_name, application_version, docker_image):
                              security_groups=[sg.id],
                              user_data=init_script.encode('utf-8'),
                              instance_type=manifest.get('instance_type', 't2.micro'),
+                             instance_profile_name=sg_name,
                              associate_public_ip_address=True)
     autoscale.create_launch_configuration(lc)
     ok()
@@ -523,6 +525,42 @@ def create(ctx, manifest_file):
         for rule in rules:
             modify_sg(conn, sg, rule, authorize=True)
         ok()
+
+    action('Creating IAM role and instance profile..')
+    iam_conn = boto.iam.connect_to_region(region)
+    iam_conn.create_role(sg_name)
+    iam_conn.create_instance_profile(sg_name)
+    iam_conn.add_role_to_instance_profile(instance_profile_name=sg_name, role_name=sg_name)
+    ok()
+
+
+@applications.command()
+@click.argument('application-name')
+@click.pass_context
+def delete(ctx, application_name):
+    """
+    Delete an application
+    """
+    region = ctx.obj['region']
+
+    conn = boto.ec2.connect_to_region(region)
+    sg, manifest = get_app_security_group_manifest(conn, application_name)
+
+    action('Deleting security group..')
+    sg.delete()
+    ok()
+
+    action('Deleting keypair..')
+    keypair = conn.get_key_pair(sg.name)
+    keypair.delete()
+    ok()
+
+    action('Deleting IAM role..')
+    iam_conn = boto.iam.connect_to_region(region)
+    iam_conn.remove_role_from_instance_profile(instance_profile_name=sg.name, role_name=sg.name)
+    iam_conn.delete_instance_profile(sg.name)
+    iam_conn.delete_role(sg.name)
+    ok()
 
 
 def main():
