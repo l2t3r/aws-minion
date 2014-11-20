@@ -39,12 +39,14 @@ def validate_application_name(ctx, param, value):
     match = APPLICATION_NAME_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid application name (allowed: {})'.format(APPLICATION_NAME_PATTERN.pattern))
+    return value
 
 
 def validate_application_version(ctx, param, value):
     match = APPLICATION_VERSION_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid app version (allowed: {})'.format(APPLICATION_VERSION_PATTERN.pattern))
+    return value
 
 
 class AliasedGroup(click.Group):
