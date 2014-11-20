@@ -511,15 +511,17 @@ def load_credentials():
     return credentials_map
 
 
-def prepare_log_shipper_script(data):
+def prepare_log_shipper_script(application_name, application_version, data):
     if not data.get('loggly_auth_token'):
         return ''
     return dedent('''\
         #!/bin/bash
         LOG_FILE=/var/log/docker.log
 
+        APP={application_name}-{application_version}
         LOGGLY_ACCOUNT={loggly_account}
         LOGGLY_USER={loggly_user}
+        LOGGLY_PASSWORD={loggly_password}
         LOGGLY_AUTH_TOKEN={loggly_auth_token}
 
         if [ "$LOGGLY_AUTH_TOKEN" = "" ]
@@ -556,6 +558,8 @@ def prepare_log_shipper_script(data):
           exit 1
         fi
 
+        chmod 666 $LOG_FILE
+
         curl -O https://www.loggly.com/install/configure-file-monitoring.sh
         if [ $? -ne 0 ]
         then
@@ -563,14 +567,16 @@ def prepare_log_shipper_script(data):
           exit 1
         fi
 
-        ARGS="-a $LOGGLY_ACCOUNT -t $LOGGLY_AUTH_TOKEN  -u $LOGGLY_USER -p $LOGGLY_PASSWORD -f $LOG_FILE -l DOCKER_LOG"
+        ARGS="-a $LOGGLY_ACCOUNT -t $LOGGLY_AUTH_TOKEN  -u $LOGGLY_USER -p $LOGGLY_PASSWORD -f $LOG_FILE -l $APP"
         sudo bash configure-file-monitoring.sh $ARGS
 
         if [ $? -ne 0 ]
         then
           echo "could not configure loggly file monitoring"
           exit 1
-        fi''').format(loggly_user=data['loggly_user'],
+        fi''').format(application_name=application_name,
+                      application_version=application_version,
+                      loggly_user=data['loggly_user'],
                       loggly_password=data['loggly_password'],
                       loggly_account=data['loggly_account'],
                       loggly_auth_token=data['loggly_auth_token'])
@@ -607,7 +613,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     key_name = sg_name
 
-    log_shipper_script = prepare_log_shipper_script(ctx.obj)
+    log_shipper_script = prepare_log_shipper_script(application_name, application_version, ctx.obj)
 
     init_script = '''#!/bin/bash
     # add Docker repo
