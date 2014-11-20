@@ -198,7 +198,7 @@ def applications(ctx):
         rows = []
         all_security_groups = conn.get_all_security_groups()
         for _sg in all_security_groups:
-            if _sg.name.startswith('app-') and _sg.vpc_id == vpc:
+            if _sg.name.startswith('app-') and _sg.vpc_id == vpc and not _sg.name.endswith('-lb'):
                 manifest = yaml.safe_load(_sg.tags['Manifest'])
                 rows.append({k: str(v) for k, v in manifest.items()})
         rows.sort(key=lambda x: (x['application_name']))
@@ -552,7 +552,7 @@ while True:
     )
 
     action('Creating load blanacer for {application_name} version {application_version}..', **vars())
-    ports = [(manifest['exposed_ports'][0], manifest['exposed_ports'][0], 'http')]
+    ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
     lb = elb_conn.create_load_balancer('app-{}-{}'.format(manifest['application_name'],
                                                           application_version.replace('.', '-')), zones=None,
@@ -586,6 +586,16 @@ while True:
     autoscale.create_or_update_tags(tags)
 
     ag.set_capacity(1)
+    ok()
+
+    click.secho('DNS name of load balancer is {}'.format(lb.dns_name), fg='blue', bold=True)
+
+    action('Waiting for instance start and LB..')
+    lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
+    while not lb.instances:
+        time.sleep(3)
+        click.secho(' .', nl=False)
+        lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
     ok()
 
 
@@ -643,15 +653,29 @@ def create(ctx, manifest_file):
         if _sg.name == sg_name and _sg.vpc_id == vpc:
             exists = True
     if not exists:
-        action('Creating security group {sg_name}..', **vars())
+        action('Creating application security group {sg_name}..', **vars())
         sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
         # HACK: add manifest as tag
         sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
         rules = [
             SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
             SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
+        ]
+
+        for rule in rules:
+            modify_sg(conn, sg, rule, authorize=True)
+        ok()
+
+        lb_sg_name = sg_name + '-lb'
+        action('Creating LB security group {lb_sg_name}..', **vars())
+        sg = conn.create_security_group(lb_sg_name, 'LB security group', vpc_id=vpc)
+        # HACK: add manifest as tag
+        sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+
+        rules = [
+            SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
+            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
         ]
 
         for rule in rules:
@@ -679,7 +703,12 @@ def delete(ctx, application_name: str):
     sg, manifest = get_app_security_group_manifest(conn, application_name)
 
     action('Deleting security group..')
-    sg.delete()
+    while True:
+        try:
+            sg.delete()
+        except:
+            time.sleep(3)
+            click.secho(' .', nl=False)
     ok()
 
     action('Deleting keypair..')
@@ -692,6 +721,14 @@ def delete(ctx, application_name: str):
     iam_conn.remove_role_from_instance_profile(instance_profile_name=sg.name, role_name=sg.name)
     iam_conn.delete_instance_profile(sg.name)
     iam_conn.delete_role(sg.name)
+    ok()
+
+    action('Deleting LB security group..')
+    all_security_groups = conn.get_all_security_groups()
+    lb_sg_name = 'app-{}-lb'.format(application_name)
+    for _sg in all_security_groups:
+        if _sg.name == lb_sg_name:
+            _sg.delete()
     ok()
 
 
