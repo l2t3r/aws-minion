@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import shlex
+from textwrap import dedent
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
@@ -29,6 +30,8 @@ APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
 # NOTE: version MUST not contain any dash ("-")
 APPLICATION_VERSION_PATTERN = re.compile('^[a-zA-Z0-9.]{1,200}$')
 
+VPC_ID_PATTERN = re.compile('^vpc-[a-z0-9]+$')
+
 SecurityGroupRule = collections.namedtuple("SecurityGroupRule",
                                            ["ip_protocol", "from_port", "to_port", "cidr_ip", "src_group_name"])
 
@@ -46,6 +49,13 @@ def validate_application_version(ctx, param, value):
     match = APPLICATION_VERSION_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid app version (allowed: {})'.format(APPLICATION_VERSION_PATTERN.pattern))
+    return value
+
+
+def validate_vpc_id(ctx, param, value):
+    match = VPC_ID_PATTERN.match(value)
+    if not match:
+        raise click.BadParameter('invalid VPC ID (allowed: {})'.format(VPC_ID_PATTERN.pattern))
     return value
 
 
@@ -125,7 +135,7 @@ def cli(ctx):
 
 @cli.command()
 @click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
-@click.option('--vpc', help='AWS VPC ID', prompt='AWS VPC ID')
+@click.option('--vpc', help='AWS VPC ID', prompt='AWS VPC ID (e.g. "vpc-abcd1234")', callback=validate_vpc_id)
 @click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
 @click.pass_context
 def configure(ctx, region, vpc, domain):
@@ -148,12 +158,43 @@ def configure(ctx, region, vpc, domain):
         click.secho('AWS credentials file not found, please provide them now')
         key_id = click.prompt('AWS Access Key ID')
         secret = click.prompt('AWS Secret Access Key', hide_input=True)
+
         os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
+
+        credentials_content = dedent('''\
+            [default]
+            aws_access_key_id     = {key_id}
+            aws_secret_access_key = {secret}
+            ''').format(key_id=key_id, secret=secret)
         with open(credentials_path, 'w') as fd:
-            fd.write('''[default]
-aws_access_key_id = {key_id}
-aws_secret_access_key = {secret}
-'''.format(key_id=key_id, secret=secret))
+            fd.write(credentials_content)
+
+    # handle Loggly configuration if needed
+    while True:
+        configure_loggly = click.prompt('Do you want to configure Loggly? [y/n]', 'y')
+        configure_loggly = configure_loggly.lower()
+        if configure_loggly == 'y' or configure_loggly == 'n':
+            break
+        else:
+            print('input has to be [y/n]')
+
+    configure_loggly = configure_loggly == 'y'
+
+    loggly_account = None
+    loggly_user = None
+    loggly_password = None
+    loggly_auth_token = None
+
+    if configure_loggly:
+        loggly_account = click.prompt('Loggly Account/Subdomain (e.g. "mycompany")')
+        loggly_user = click.prompt('Loggly User (e.g. "jdoe")')
+        loggly_password = click.prompt('Loggly Password', hide_input=True)
+        loggly_auth_token = click.prompt('Loggly Auth Token', hide_input=True)
+
+    data['loggly_account'] = loggly_account
+    data['loggly_user'] = loggly_user
+    data['loggly_password'] = loggly_password
+    data['loggly_auth_token'] = loggly_auth_token
 
     action('Connecting to region {region}..', **vars())
     vpc_conn = boto.vpc.connect_to_region(region)
@@ -203,6 +244,7 @@ def applications(ctx):
                 rows.append({k: str(v) for k, v in manifest.items()})
         rows.sort(key=lambda x: (x['application_name']))
         print_table('application_name team_name exposed_ports stateful'.split(), rows)
+
 
 PREFIX = 'app-'
 
@@ -262,7 +304,7 @@ def versions(ctx):
 
         rows.sort(key=lambda x: (x['application_name'], x['application_version']))
         print_table(('application_name application_version ' +
-                    'docker_image instance_states desired_capacity created_time').split(), rows)
+                     'docker_image instance_states desired_capacity created_time').split(), rows)
 
 
 def parse_instance_name(name: str) -> tuple:
@@ -454,14 +496,93 @@ def generate_env_options(env_vars: dict):
     return ' '.join(options)
 
 
+def load_credentials():
+    credentials_map = dict()
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+
+    if os.path.exists(credentials_path):
+        with open(credentials_path) as fd:
+            for line in fd:
+                name, var = line.partition("=")[::2]
+                credentials_map[name.strip()] = var.strip()
+    else:
+        error('COULD NOT FIND FILE ~/.aws/credentials , ABORTING')
+
+    return credentials_map
+
+
+def prepare_log_shipper_script(data):
+    if not data.get('loggly_auth_token'):
+        return ''
+    return dedent('''\
+        #!/bin/bash
+        LOG_FILE=/var/log/docker.log
+
+        LOGGLY_ACCOUNT={loggly_account}
+        LOGGLY_USER={loggly_user}
+        LOGGLY_AUTH_TOKEN={loggly_auth_token}
+
+        if [ "$LOGGLY_AUTH_TOKEN" = "" ]
+        then
+          echo "LOGGLY_AUTH_TOKEN is not configured"
+          exit 1
+        fi
+
+        if [ "$LOGGLY_USER" = "" ]
+        then
+          echo "LOGGLY_USER is not configured"
+          exit 1
+        fi
+
+        if [ "$LOGGLY_PASSWORD" = "" ]
+        then
+          echo "LOGGLY_PASSWORD is not configured"
+          exit 1
+        fi
+
+        containerId=$1
+        if [ "$containerId" = "" ]
+        then
+           echo "no Docker container id passed to log shipper script"
+           exit 1
+        fi
+
+        currentDockerFile=/var/lib/docker/containers/$containerId/$containerId-json.log
+
+        sudo ln $currentDockerFile $LOG_FILE
+        if [ $? -ne 0 ]
+        then
+          echo "could not create hard link $LOG_FILE for $currentDockerFile"
+          exit 1
+        fi
+
+        curl -O https://www.loggly.com/install/configure-file-monitoring.sh
+        if [ $? -ne 0 ]
+        then
+          echo "could not download https://www.loggly.com/install/configure-file-monitoring.sh"
+          exit 1
+        fi
+
+        ARGS="-a $LOGGLY_ACCOUNT -t $LOGGLY_AUTH_TOKEN  -u $LOGGLY_USER -p $LOGGLY_PASSWORD -f $LOG_FILE -l DOCKER_LOG"
+        sudo bash configure-file-monitoring.sh $ARGS
+
+        if [ $? -ne 0 ]
+        then
+          echo "could not configure loggly file monitoring"
+          exit 1
+        fi''').format(loggly_user=data['loggly_user'],
+                      loggly_password=data['loggly_password'],
+                      loggly_account=data['loggly_account'],
+                      loggly_auth_token=data['loggly_auth_token'])
+
+
 @versions.command('create')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
-@click.option('--log-url', help='Optional Loggly url (e.g. http://logs-01.loggly.com/inputs/MYTOK/tag/MYTAG)')
 @click.pass_context
-def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, log_url: str):
+def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list):
     """
     Create a new application version
     """
@@ -486,27 +607,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     key_name = sg_name
 
-    log_shipper_script = '''#!/usr/bin/env python3
-import time, subprocess, select, glob, urllib.request, sys
-
-if len(sys.argv) < 2:
-    print('Missing LOG_URL argument.')
-    sys.exit(1)
-
-fns = glob.glob('/var/lib/docker/containers/*/*.log')
-while not fns:
-    time.sleep(3)
-    fns = glob.glob('/var/lib/docker/containers/*/*.log')
-
-filename = fns[0]
-f = subprocess.Popen(['tail', '-F', filename], stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-p = select.poll()
-p.register(f.stdout)
-while True:
-    if p.poll(1):
-        urllib.request.urlopen(sys.argv[1], f.stdout.readline().strip())
-    time.sleep(1)
-'''
+    log_shipper_script = prepare_log_shipper_script(ctx.obj)
 
     init_script = '''#!/bin/bash
     # add Docker repo
@@ -518,15 +619,14 @@ while True:
     # Docker
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker
 
-    docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image}
+    containerId=$(docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image})
 
-    echo "{log_shipper_script}" > /tmp/log-shipper.py
-    python3 /tmp/log-shipper.py {log_url}
+    echo '{log_shipper_script}' > /tmp/log-shipper.sh
+    bash /tmp/log-shipper.sh $containerId
     '''.format(docker_image=docker_image,
                exposed_port=manifest['exposed_ports'][0],
                env_options=generate_env_options(env_vars),
-               log_shipper_script=log_shipper_script,
-               log_url=log_url or '')
+               log_shipper_script=log_shipper_script)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
