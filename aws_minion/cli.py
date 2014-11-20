@@ -17,6 +17,7 @@ import os
 import random
 import time
 import datetime
+import re
 import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
@@ -24,10 +25,26 @@ from aws_minion.console import print_table, action, ok, error
 
 AMI_ID = 'ami-f0b11187'
 
+APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
+# NOTE: version MUST not contain any dash ("-")
+APPLICATION_VERSION_PATTERN = re.compile('^[a-zA-Z0-9.]{1,200}$')
+
 SecurityGroupRule = collections.namedtuple("SecurityGroupRule",
                                            ["ip_protocol", "from_port", "to_port", "cidr_ip", "src_group_name"])
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
+
+def validate_application_name(ctx, param, value):
+    match = APPLICATION_NAME_PATTERN.match(value)
+    if not match:
+        raise click.BadParameter('invalid application name (allowed: {})'.format(APPLICATION_NAME_PATTERN.pattern))
+
+
+def validate_application_version(ctx, param, value):
+    match = APPLICATION_VERSION_PATTERN.match(value)
+    if not match:
+        raise click.BadParameter('invalid app version (allowed: {})'.format(APPLICATION_VERSION_PATTERN.pattern))
 
 
 class AliasedGroup(click.Group):
@@ -281,8 +298,8 @@ def instances(ctx):
 
 
 @versions.command()
-@click.argument('application-name')
-@click.argument('application-version')
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
 @click.pass_context
 def activate(ctx, application_name, application_version):
     """
@@ -322,8 +339,8 @@ def activate(ctx, application_name, application_version):
 
 
 @versions.command()
-@click.argument('application-name')
-@click.argument('application-version')
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
 @click.argument('desired-instances', type=int)
 @click.pass_context
 def scale(ctx, application_name, application_version, desired_instances: int):
@@ -351,8 +368,8 @@ def scale(ctx, application_name, application_version, desired_instances: int):
 
 
 @versions.command('delete')
-@click.argument('application-name')
-@click.argument('application-version')
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
 @click.pass_context
 def delete_version(ctx, application_name: str, application_version: str):
     """
@@ -436,8 +453,8 @@ def generate_env_options(env_vars: dict):
 
 
 @versions.command('create')
-@click.argument('application-name')
-@click.argument('application-version')
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
 @click.option('--log-url', help='Optional Loggly url (e.g. http://logs-01.loggly.com/inputs/MYTOK/tag/MYTAG)')
@@ -446,6 +463,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     """
     Create a new application version
     """
+
     region = ctx.obj['region']
     vpc = ctx.obj['vpc']
 
@@ -584,6 +602,8 @@ def create(ctx, manifest_file):
 
     application_name = manifest['application_name']
     team_name = manifest['team_name']
+
+    validate_application_name(ctx, 'manifest-file', application_name)
 
     region = ctx.obj['region']
     vpc = ctx.obj['vpc']
