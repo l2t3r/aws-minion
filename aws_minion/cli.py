@@ -549,6 +549,11 @@ def prepare_log_shipper_script(application_name, application_version, data):
           exit 1
         fi
 
+        # HACK to workaround hanging "cat /dev/urandom"
+        curl -s -o configure-linux.sh https://www.loggly.com/install/configure-linux.sh
+        sed -i s/^curl/#curl/ configure-file-monitoring.sh
+        sed -i s/^LINUX_DO_VERIFICATION=/LINUX_DO_VERIFICATION=\"false\"#/ configure-linux.sh
+
         ARGS="-a $LOGGLY_ACCOUNT -t $LOGGLY_AUTH_TOKEN  -u $LOGGLY_USER -p $LOGGLY_PASSWORD -f $LOG_FILE -l $APP"
         bash configure-file-monitoring.sh $ARGS
 
