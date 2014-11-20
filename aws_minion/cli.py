@@ -544,6 +544,16 @@ while True:
     autoscale.create_launch_configuration(lc)
     ok()
 
+    all_security_groups = conn.get_all_security_groups()
+    lb_sg_name = 'app-{}-lb'.format(application_name)
+    lb_sg = None
+    for _sg in all_security_groups:
+        if _sg.name == lb_sg_name:
+            lb_sg = _sg
+
+    if not lb_sg:
+        raise Exception('LB security group not found')
+
     hc = HealthCheck(
         interval=20,
         healthy_threshold=3,
@@ -557,7 +567,7 @@ while True:
     lb = elb_conn.create_load_balancer('app-{}-{}'.format(manifest['application_name'],
                                                           application_version.replace('.', '-')), zones=None,
                                        listeners=ports,
-                                       subnets=[subnet.id for subnet in subnets], security_groups=[sg.id])
+                                       subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
     lb.configure_health_check(hc)
     ok()
 
@@ -596,6 +606,12 @@ while True:
         time.sleep(3)
         click.secho(' .', nl=False)
         lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
+    ok()
+
+    action('Waiting for LB members to become active..')
+    while not [i.state for i in lb.get_instance_health() if i.state == 'InService']:
+        time.sleep(3)
+        click.secho(' .', nl=False)
     ok()
 
 
