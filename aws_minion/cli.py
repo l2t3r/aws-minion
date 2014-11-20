@@ -524,24 +524,6 @@ def prepare_log_shipper_script(application_name, application_version, data):
         LOGGLY_PASSWORD={loggly_password}
         LOGGLY_AUTH_TOKEN={loggly_auth_token}
 
-        if [ "$LOGGLY_AUTH_TOKEN" = "" ]
-        then
-          echo "LOGGLY_AUTH_TOKEN is not configured"
-          exit 1
-        fi
-
-        if [ "$LOGGLY_USER" = "" ]
-        then
-          echo "LOGGLY_USER is not configured"
-          exit 1
-        fi
-
-        if [ "$LOGGLY_PASSWORD" = "" ]
-        then
-          echo "LOGGLY_PASSWORD is not configured"
-          exit 1
-        fi
-
         containerId=$1
         if [ "$containerId" = "" ]
         then
@@ -551,7 +533,7 @@ def prepare_log_shipper_script(application_name, application_version, data):
 
         currentDockerFile=/var/lib/docker/containers/$containerId/$containerId-json.log
 
-        sudo ln $currentDockerFile $LOG_FILE
+        ln $currentDockerFile $LOG_FILE
         if [ $? -ne 0 ]
         then
           echo "could not create hard link $LOG_FILE for $currentDockerFile"
@@ -568,18 +550,19 @@ def prepare_log_shipper_script(application_name, application_version, data):
         fi
 
         ARGS="-a $LOGGLY_ACCOUNT -t $LOGGLY_AUTH_TOKEN  -u $LOGGLY_USER -p $LOGGLY_PASSWORD -f $LOG_FILE -l $APP"
-        sudo bash configure-file-monitoring.sh $ARGS
+        bash configure-file-monitoring.sh $ARGS
 
         if [ $? -ne 0 ]
         then
           echo "could not configure loggly file monitoring"
           exit 1
-        fi''').format(application_name=application_name,
-                      application_version=application_version,
-                      loggly_user=data['loggly_user'],
-                      loggly_password=data['loggly_password'],
-                      loggly_account=data['loggly_account'],
-                      loggly_auth_token=data['loggly_auth_token'])
+        fi
+        ''').format(application_name=application_name,
+                    application_version=application_version,
+                    loggly_user=data['loggly_user'],
+                    loggly_password=data['loggly_password'],
+                    loggly_account=data['loggly_account'],
+                    loggly_auth_token=data['loggly_auth_token'])
 
 
 @versions.command('create')
