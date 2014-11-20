@@ -72,10 +72,11 @@ def print_table(cols, rows):
             val = row.get(col)
             colwidths[col] = min(max(colwidths[col], len(format(col, val))), MAX_COLUMN_WIDTH.get(col, 1000))
 
-    for col in cols:
+    for i, col in enumerate(cols):
         click.secho(('{:' + str(colwidths[col]) + '}').format(TITLES.get(col, col.title().replace('_', ' '))),
                     nl=False, fg='black', bg='white')
-        click.secho(' ', nl=False, fg='black', bg='white')
+        if i < len(cols)-1:
+            click.secho('│', nl=False, fg='black', bg='white')
     click.echo('')
 
     for row in rows:
