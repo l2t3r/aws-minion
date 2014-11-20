@@ -359,9 +359,9 @@ def traffic(ctx, application_name, application_version, percentage):
     conn = boto.ec2.connect_to_region(region)
 
     sg, manifest = get_app_security_group_manifest(conn, application_name)
-
+    identifier='app-{}-{}'.format(manifest['application_name'], application_version)
     autoscale = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+    groups = autoscale.get_all_groups(names=[identifier])
 
     if not groups:
         raise Exception('Autoscaling group for application version not found')
@@ -374,18 +374,34 @@ def traffic(ctx, application_name, application_version, percentage):
     dns_name = '{}.{}.'.format(application_name, domain)
     rr = zone.get_records()
 
-    total = 0
+    count = 0
+    partial_sum = 0
+    known_records = {}
     for r in rr:
         if r.type == 'CNAME' and r.name == dns_name:
-            w = r.weight
-            if w:
-                w = int(w)
-                total =+ int(w)
+            if r.weight:
+                w = int(r.weight)
+                count =+ 1
+            else:
+                w = 0
+            known_records[r.identifier] = w
+            if r.identifier != identifier:
+                partial_sum =+ w
 
-    if percentage == 100: # set it is the only traffic destination
+    # we should distribute the partial_sum/(count-1) over all the existing versions
+
+
+
+
+    if percentage == 100: # set it as the only traffic destination
         for r in rr:
             if r.type == 'CNAME' and r.name == dns_name:
                 rr.add_change_record('DELETE', r)
+    elif percentage == 0: # disable traffic
+        for r in rr:
+            if r.type == 'CNAME' and r.name == dns_name:
+                rr.add_change_record('DELETE', r)
+
 
     lb = elb_conn.get_all_load_balancers(
         load_balancer_names=['app-{}-{}'.format(application_name, application_version.replace('.', '-'))])[0]
