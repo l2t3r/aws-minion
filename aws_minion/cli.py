@@ -344,10 +344,11 @@ def instances(ctx):
 @versions.command()
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
+@click.argument('percentage', type=click.IntRange(0, 100, clamp=True))
 @click.pass_context
-def activate(ctx, application_name, application_version):
+def traffic(ctx, application_name, application_version, percentage):
     """
-    Activate a single application version (put it into the non-versioned LB)
+    Set the percentage of the traffic for a single application version
     """
     region = ctx.obj['region']
     domain = ctx.obj['domain']
@@ -373,10 +374,24 @@ def activate(ctx, application_name, application_version):
     dns_name = '{}.{}.'.format(application_name, domain)
     rr = zone.get_records()
 
+    total = 0
+    for r in rr:
+        if r.type == 'CNAME' and r.name == dns_name:
+            w = r.weight
+            if w:
+                w = int(w)
+                total =+ int(w)
+
+    if percentage == 100: # set it is the only traffic destination
+        for r in rr:
+            if r.type == 'CNAME' and r.name == dns_name:
+                rr.add_change_record('DELETE', r)
+
     lb = elb_conn.get_all_load_balancers(
         load_balancer_names=['app-{}-{}'.format(application_name, application_version.replace('.', '-'))])[0]
 
-    change = rr.add_change('UPSERT', dns_name, 'CNAME', ttl=60, weight=1)
+    change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=application_name + ' ' + application_version, weight=percentage)
+
     change.add_value(lb.dns_name)
     rr.commit()
     ok()
