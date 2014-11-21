@@ -86,14 +86,6 @@ def generate_random_name(prefix: str, size: int) -> str:
     return '{}%0{}x'.format(prefix, size) % random.randrange(16 ** size)
 
 
-def generate_dns_recordset_identifier(application_name: str, application_version: str) -> str:
-    return '{}{}-{}'.format(PREFIX, application_name, application_version.replace('.', '-'))
-
-
-def generate_autoscale_identifier(application_name: str, application_version: str) -> str:
-    return '{}{}-{}'.format(PREFIX, application_name, application_version)
-
-
 def modify_sg(c, group, rule, authorize=False, revoke=False):
     src_group = None
     if rule.src_group_name:
@@ -344,26 +336,15 @@ def traffic(ctx, application_name, application_version, percentage: int):
     region = ctx.obj.region
     domain = ctx.obj.domain
 
-    if not domain:
-        raise ValueError('Missing DNS domain setting')
+    version = ctx.obj.get_version(application_name, application_version)
 
-    ctx.obj.get_application(application_name)
-
-    identifier = generate_dns_recordset_identifier(application_name, application_version)
-
-    autoscale_conn = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale_conn.get_all_groups(names=[generate_autoscale_identifier(application_name, application_version)])
-
-    if not groups:
-        raise Exception('Autoscaling group for application version not found')
+    identifier = version.dns_identifier
 
     dns_conn = boto.route53.connect_to_region(region)
     zone = dns_conn.get_zone(domain + '.')
     dns_name = '{}.{}.'.format(application_name, domain)
 
-    elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.get_all_load_balancers(load_balancer_names=[identifier])[0]
-    version_dns_name = lb.dns_name
+    lb = version.get_load_balancer()
 
     rr = zone.get_records()
 
@@ -420,7 +401,7 @@ def traffic(ctx, application_name, application_version, percentage: int):
 
     if percentage > 0 and not did_the_upsert:
         change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=identifier, weight=percentage)
-        change.add_value(version_dns_name)
+        change.add_value(lb.dns_name)
 
     if rr.changes:
         rr.commit()
@@ -436,21 +417,13 @@ def scale(ctx, application_name, application_version, desired_instances: int):
     """
     Scale an application version (set desired instance count)
     """
-    region = ctx.obj.region
 
-    ctx.obj.get_application(application_name)
+    version = ctx.obj.get_version(application_name, application_version)
 
     action('Scaling application {application_name} version {application_version} to {desired_instances} instances',
            **vars())
-    autoscale = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(application_name, application_version)])
 
-    if not groups:
-        raise Exception('Autoscaling group for application version not found')
-
-    group = groups[0]
-
-    group.set_capacity(desired_instances)
+    version.auto_scaling_group.set_capacity(desired_instances)
     ok()
 
 
@@ -466,20 +439,14 @@ def delete_version(ctx, application_name: str, application_version: str):
 
     conn = boto.ec2.connect_to_region(region)
 
-    ctx.obj.get_application(application_name)
+    version = ctx.obj.get_version(application_name, application_version)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(application_name, application_version)])
 
-    if not groups:
-        raise Exception('Autoscaling group for application version not found')
-
-    group = groups[0]
-
-    running_instance_ids = set([i.instance_id for i in group.instances])
+    running_instance_ids = set([i.instance_id for i in version.auto_scaling_group.instances])
 
     action('Shutting down {instance_count} instances..', instance_count=len(running_instance_ids))
-    group.shutdown_instances()
+    version.auto_scaling_group.shutdown_instances()
 
     # wait for shutdown
     while running_instance_ids:
@@ -494,7 +461,7 @@ def delete_version(ctx, application_name: str, application_version: str):
     action('Deleting auto scaling group..')
     while True:
         try:
-            group.delete()
+            version.auto_scaling_group.delete()
             break
         except:
             # You cannot delete an AutoScalingGroup while there are scaling activities in progress for that group.

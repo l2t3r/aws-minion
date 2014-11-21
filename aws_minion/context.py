@@ -94,7 +94,7 @@ class Context:
         app = Application(application_name, conn)
         return app
 
-    def get_versions(self) -> list:
+    def get_versions(self, application_name=None, application_version=None) -> list:
         autoscale = boto.ec2.autoscale.connect_to_region(self.region)
         groups = autoscale.get_all_groups()
         rows = []
@@ -111,11 +111,23 @@ class Context:
 
         for group in groups:
             if group.name.startswith(IDENTIFIER_PREFIX):
-                application_name, application_version = group.name[len(IDENTIFIER_PREFIX):].rsplit('-', 1)
-                version = ApplicationVersion(self.region, application_name, application_version, group)
+                _application_name, _application_version = group.name[len(IDENTIFIER_PREFIX):].rsplit('-', 1)
+                if application_name and _application_name != application_name:
+                    continue
+
+                if application_version and _application_version != application_version:
+                    continue
+
+                version = ApplicationVersion(self.region, _application_name, _application_version, group)
                 version.weight = weights.get(version.dns_identifier)
                 rows.append(version)
         return rows
+
+    def get_version(self, application_name, application_version):
+        versions = self.get_versions(application_name, application_version)
+        if not versions:
+            raise Exception('Version {application_version} of application {application_name} not found', **vars())
+        return versions[0]
 
     def get_instances(self) -> list:
         conn = boto.ec2.connect_to_region(self.region)
