@@ -417,37 +417,32 @@ def traffic(ctx, application_name, application_version, percentage: int):
         if i == identifier:
             n = percentage
         else:
-            n = int(max(1, w + delta))
+            if percentage == 100:
+                n = 0
+            else:
+                n = int(max(1, w + delta))
         new_record_weights[i] = n
         total_weight = total_weight + n
 
     print(new_record_weights, total_weight)
 
-    if percentage == 100:  # set it as the only traffic destination
-        action('Directing all traffic of {} to version {}'.format(application_name, application_version))
-        for r in rr:
-            if r.type == 'CNAME' and r.name == dns_name:
+    action('Setting weights..')
+    did_the_upsert = False
+    for r in rr:
+        if r.type == 'CNAME' and r.name == dns_name:
+            w = new_record_weights[r.identifier]
+            if w:
+                if int(r.weight) != w:
+                    r.weight = w
+                    rr.add_change_record('UPSERT', r)
+                if identifier == r.identifier:
+                    did_the_upsert = True
+            else:
                 rr.add_change_record('DELETE', r)
+
+    if percentage > 0 and not did_the_upsert:
         change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=identifier, weight=percentage)
         change.add_value(version_dns_name)
-    else:
-        action('Setting weights..')
-        did_the_upsert = False
-        for r in rr:
-            if r.type == 'CNAME' and r.name == dns_name:
-                w = new_record_weights[r.identifier]
-                if w:
-                    if int(r.weight) != w:
-                        r.weight = w
-                        rr.add_change_record('UPSERT', r)
-                    if identifier == r.identifier:
-                        did_the_upsert = True
-                else:
-                    rr.add_change_record('DELETE', r)
-
-        if percentage > 0 and not did_the_upsert:
-            change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=identifier, weight=percentage)
-            change.add_value(version_dns_name)
 
     if rr.changes:
         rr.commit()
