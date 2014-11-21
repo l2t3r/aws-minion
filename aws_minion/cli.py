@@ -297,11 +297,12 @@ def versions(ctx):
                          'instance_states': instance_states,
                          'desired_capacity': version.auto_scaling_group.desired_capacity,
                          'dns_name': dns_name,
+                         'weight': version.weight,
                          'created_time': parse_time(version.auto_scaling_group.created_time)})
 
         rows.sort(key=lambda x: (x['application_name'], x['application_version']))
         print_table(('application_name application_version ' +
-                     'docker_image instance_states desired_capacity created_time').split(), rows)
+                     'docker_image instance_states desired_capacity weight created_time').split(), rows)
 
 
 def parse_instance_name(name: str) -> tuple:
@@ -391,8 +392,6 @@ def traffic(ctx, application_name, application_version, percentage: int):
         # TODO: show a warning
         percentage = 100
 
-    print(known_record_weights, {'delta': delta, 'partial_sum': partial_sum, 'partial_count': partial_count})
-
     new_record_weights = {}
     total_weight = 0
     for i, w in known_record_weights.items():
@@ -405,8 +404,6 @@ def traffic(ctx, application_name, application_version, percentage: int):
                 n = int(max(1, w + delta))
         new_record_weights[i] = n
         total_weight = total_weight + n
-
-    print(new_record_weights, total_weight)
 
     action('Setting weights..')
     did_the_upsert = False

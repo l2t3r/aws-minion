@@ -34,6 +34,7 @@ class ApplicationVersion:
         self.application_name = application_name
         self.version = version
         self.auto_scaling_group = auto_scaling_group
+        self.weight = None
 
         self.tags = {}
         for tag in auto_scaling_group.tags:
@@ -44,13 +45,17 @@ class ApplicationVersion:
         return '{}{}-{}'.format(IDENTIFIER_PREFIX, self.application_name, self.version)
 
     @property
+    def dns_identifier(self):
+        return self.identifier.replace('.', '-')
+
+    @property
     def docker_image(self):
         return self.tags.get('DockerImage')
 
     def get_load_balancer(self) -> LoadBalancer:
         elb_conn = boto.ec2.elb.connect_to_region(self.region)
         try:
-            lb = elb_conn.get_all_load_balancers(load_balancer_names=[self.identifier.replace('.', '-')])[0]
+            lb = elb_conn.get_all_load_balancers(load_balancer_names=[self.dns_identifier])[0]
             return lb
         except:
             return None
@@ -93,10 +98,23 @@ class Context:
         autoscale = boto.ec2.autoscale.connect_to_region(self.region)
         groups = autoscale.get_all_groups()
         rows = []
+
+        dns_conn = boto.route53.connect_to_region(self.region)
+        zone = dns_conn.get_zone(self.domain + '.')
+
+        rr = zone.get_records()
+
+        weights = {}
+        for r in rr:
+            if r.type == 'CNAME' and r.identifier and r.weight:
+                weights[r.identifier] = int(r.weight)
+
         for group in groups:
             if group.name.startswith(IDENTIFIER_PREFIX):
                 application_name, application_version = group.name[len(IDENTIFIER_PREFIX):].rsplit('-', 1)
-                rows.append(ApplicationVersion(self.region, application_name, application_version, group))
+                version = ApplicationVersion(self.region, application_name, application_version, group)
+                version.weight = weights.get(version.dns_identifier)
+                rows.append(version)
         return rows
 
     def get_instances(self) -> list:
