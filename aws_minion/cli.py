@@ -513,12 +513,6 @@ def prepare_log_shipper_script(application_name, application_version, data):
         #!/bin/bash
         LOG_FILE=/var/log/docker.log
 
-        APP={application_name}-{application_version}
-        LOGGLY_ACCOUNT={loggly_account}
-        LOGGLY_USER={loggly_user}
-        LOGGLY_PASSWORD={loggly_password}
-        LOGGLY_AUTH_TOKEN={loggly_auth_token}
-
         containerId=$1
         if [ "$containerId" = "" ]
         then
@@ -529,34 +523,33 @@ def prepare_log_shipper_script(application_name, application_version, data):
         currentDockerFile=/var/lib/docker/containers/$containerId/$containerId-json.log
 
         ln $currentDockerFile $LOG_FILE
-        if [ $? -ne 0 ]
-        then
-          echo "could not create hard link $LOG_FILE for $currentDockerFile"
-          exit 1
-        fi
-
         chmod 666 $LOG_FILE
 
-        curl -O https://www.loggly.com/install/configure-file-monitoring.sh
-        if [ $? -ne 0 ]
-        then
-          echo "could not download https://www.loggly.com/install/configure-file-monitoring.sh"
-          exit 1
-        fi
+        f=/etc/rsyslog.d/22-loggly.conf
 
-        # HACK to workaround hanging "cat /dev/urandom"
-        curl -s -o configure-linux.sh https://www.loggly.com/install/configure-linux.sh
-        sed -i s/^curl/#curl/ configure-file-monitoring.sh
-        sed -i s/^LINUX_DO_VERIFICATION=/LINUX_DO_VERIFICATION=\"false\"#/ configure-linux.sh
+        # Define the template used for sending logs to Loggly. Do not change this format.
+        echo '$template LogglyFormat,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% \
+%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}] %msg%\\n"' > $f
+        echo '*.* @@logs-01.loggly.com:514;LogglyFormat' >> $f
 
-        ARGS="-a $LOGGLY_ACCOUNT -t $LOGGLY_AUTH_TOKEN  -u $LOGGLY_USER -p $LOGGLY_PASSWORD -f $LOG_FILE -l $APP"
-        bash configure-file-monitoring.sh $ARGS
+        f=/etc/rsyslog.d/21-filemonitoring-{application_name}-{application_version}.conf
+        echo '$ModLoad imfile' > $f
+        echo '$InputFilePollInterval 10' >> $f
+        echo '$WorkDirectory /var/spool/rsyslog' >> $f
+        echo '$PrivDropToGroup adm' >> $f
+        echo '$InputFileName /var/log/docker.log' >> $f
+        echo '$InputFileTag {application_name}-{application_version}:' >> $f
+        echo '$InputFileStateFile stat-{application_name}-{application_version}' >> $f
+        echo '$InputFileSeverity info' >> $f
+        echo '$InputFilePersistStateInterval 20000' >> $f
+        echo '$InputRunFileMonitor' >> $f
+        echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
+%timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token} tag=\\"file\\"] %msg%\\n"' >> $f
+        echo 'if $programname == \\'{application_name}-{application_version}\\' then \
+@@logs-01.loggly.com:514;LogglyFormatFile{application_name}-{application_version}' >> $f
+        echo 'if $programname == \\'{application_name}-{application_version}\\' then stop' >> $f
 
-        if [ $? -ne 0 ]
-        then
-          echo "could not configure loggly file monitoring"
-          exit 1
-        fi
+        service rsyslog restart
         ''').format(application_name=application_name,
                     application_version=application_version,
                     loggly_user=data['loggly_user'],
@@ -610,12 +603,12 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     containerId=$(docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image})
 
-    echo '{log_shipper_script}' > /tmp/log-shipper.sh
+    echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
     '''.format(docker_image=docker_image,
                exposed_port=manifest['exposed_ports'][0],
                env_options=generate_env_options(env_vars),
-               log_shipper_script=log_shipper_script)
+               log_shipper_script=shlex.quote(log_shipper_script))
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
