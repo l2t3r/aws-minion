@@ -126,7 +126,8 @@ class Context:
     def get_version(self, application_name, application_version):
         versions = self.get_versions(application_name, application_version)
         if not versions:
-            raise Exception('Version {application_version} of application {application_name} not found', **vars())
+            raise Exception('Version {application_version} of application {application_name} not found'.format(
+                            **vars()))
         return versions[0]
 
     def get_instances(self) -> list:

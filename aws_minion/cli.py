@@ -544,10 +544,11 @@ def prepare_log_shipper_script(application_name, application_version, data):
         echo '$InputFilePersistStateInterval 20000' >> $f
         echo '$InputRunFileMonitor' >> $f
         echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
-%timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"file\\"] %msg%\\n"' >> $f
-        echo 'if $programname == \\'{application_name}-{application_version}\\' then \
+%timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% \
+[{loggly_auth_token}@41058 tag=\\"file\\"] %msg%\\n"' >> $f
+        echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then \
 @@logs-01.loggly.com:514;LogglyFormatFile{application_name}-{application_version}' >> $f
-        echo 'if $programname == \\'{application_name}-{application_version}\\' then stop' >> $f
+        echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then stop' >> $f
 
         service rsyslog restart
         ''').format(application_name=application_name,

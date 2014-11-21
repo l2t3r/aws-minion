@@ -11,7 +11,9 @@ STYLES = {
 
 TITLES = {
     'application_version': 'Ver.',
-    'desired_capacity': 'Desired#'
+    'desired_capacity': 'Desired#',
+    'created_time': 'Created',
+    'launch_time': 'Launched'
 }
 
 MAX_COLUMN_WIDTH = {
