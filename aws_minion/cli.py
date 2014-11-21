@@ -437,18 +437,20 @@ def traffic(ctx, application_name, application_version, percentage: int):
             if r.type == 'CNAME' and r.name == dns_name:
                 w = new_record_weights[r.identifier]
                 if w:
-                    r.weight = w
-                    rr.add_change_record('UPSERT', r)
+                    if int(r.weight) != w:
+                        r.weight = w
+                        rr.add_change_record('UPSERT', r)
                     if identifier == r.identifier:
                         did_the_upsert = True
                 else:
                     rr.add_change_record('DELETE', r)
 
         if percentage > 0 and not did_the_upsert:
-            change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=i, weight=w)
+            change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=identifier, weight=percentage)
             change.add_value(version_dns_name)
 
-    rr.commit()
+    if rr.changes:
+        rr.commit()
     ok()
 
 
