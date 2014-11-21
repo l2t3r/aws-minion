@@ -90,7 +90,7 @@ def generate_dns_recordset_identifier(application_name: str, application_version
     return '{}{}-{}'.format(PREFIX, application_name, application_version.replace('.', '-'))
 
 
-def generate_autoscase_identifier(application_name: str, application_version: str) -> str:
+def generate_autoscale_identifier(application_name: str, application_version: str) -> str:
     return '{}{}-{}'.format(PREFIX, application_name, application_version)
 
 
@@ -373,7 +373,7 @@ def traffic(ctx, application_name, application_version, percentage: int):
     identifier = generate_dns_recordset_identifier(application_name, application_version)
 
     autoscale_conn = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale_conn.get_all_groups(names=[generate_autoscase_identifier(application_name, application_version)])
+    groups = autoscale_conn.get_all_groups(names=[generate_autoscale_identifier(application_name, application_version)])
 
     if not groups:
         raise Exception('Autoscaling group for application version not found')
@@ -656,7 +656,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     key_name = sg_name
 
-    log_shipper_script = prepare_log_shipper_script(application_name, application_version, ctx.obj)
+    log_shipper_script = prepare_log_shipper_script(application_name, application_version, ctx.obj.config)
 
     init_script = '''#!/bin/bash
     # add Docker repo
