@@ -529,7 +529,7 @@ def prepare_log_shipper_script(application_name, application_version, data):
 
         # Define the template used for sending logs to Loggly. Do not change this format.
         echo '$template LogglyFormat,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% \
-%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}] %msg%\\n"' > $f
+%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"system\\"] %msg%\\n"' > $f
         echo '*.* @@logs-01.loggly.com:514;LogglyFormat' >> $f
 
         f=/etc/rsyslog.d/21-filemonitoring-{application_name}-{application_version}.conf
@@ -544,7 +544,7 @@ def prepare_log_shipper_script(application_name, application_version, data):
         echo '$InputFilePersistStateInterval 20000' >> $f
         echo '$InputRunFileMonitor' >> $f
         echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
-%timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token} tag=\\"file\\"] %msg%\\n"' >> $f
+%timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"file\\"] %msg%\\n"' >> $f
         echo 'if $programname == \\'{application_name}-{application_version}\\' then \
 @@logs-01.loggly.com:514;LogglyFormatFile{application_name}-{application_version}' >> $f
         echo 'if $programname == \\'{application_name}-{application_version}\\' then stop' >> $f
