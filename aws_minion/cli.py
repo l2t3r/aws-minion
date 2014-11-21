@@ -23,9 +23,12 @@ import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 from aws_minion.console import print_table, action, ok, error
+from aws_minion.context import Context
 
 AMI_ID = 'ami-f0b11187'
 
+CONFIG_FILE_PATH = '~/.aws-minion.yaml'
+AWS_CREDENTIALS_PATH = '~/.aws/credentials'
 APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
 # NOTE: version MUST not contain any dash ("-")
 APPLICATION_VERSION_PATTERN = re.compile('^[a-zA-Z0-9.]{1,200}$')
@@ -131,14 +134,14 @@ def get_app_security_group_manifest(conn, application_name: str):
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.pass_context
 def cli(ctx):
-    path = os.path.expanduser('~/.aws-minion.yaml')
+    path = os.path.expanduser(CONFIG_FILE_PATH)
     data = {}
     if os.path.exists(path):
         with open(path, 'rb') as fd:
             data = yaml.safe_load(fd)
     if not data and not 'configure'.startswith(ctx.invoked_subcommand):
         raise click.UsageError('Please run "minion configure" first.')
-    ctx.obj = data
+    ctx.obj = Context(data)
 
 
 @cli.command()
@@ -151,7 +154,7 @@ def configure(ctx, region, vpc, domain):
     Configure the AWS connection settings
     """
     param_data = {'region': region, 'vpc': vpc, 'domain': domain}
-    path = os.path.expanduser('~/.aws-minion.yaml')
+    path = os.path.expanduser(CONFIG_FILE_PATH)
     if os.path.exists(path):
         with open(path, 'rb') as fd:
             data = yaml.safe_load(fd)
@@ -161,7 +164,7 @@ def configure(ctx, region, vpc, domain):
         if v:
             data[k] = v
 
-    credentials_path = os.path.expanduser('~/.aws/credentials')
+    credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
         click.secho('AWS credentials file not found, please provide them now')
         key_id = click.prompt('AWS Access Key ID')
@@ -228,7 +231,7 @@ def configure(ctx, region, vpc, domain):
 
     with open(path, 'w', encoding='utf-8') as fd:
         fd.write(yaml.dump(data))
-    ctx.obj = data
+    ctx.obj = Context(data)
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
@@ -239,8 +242,8 @@ def applications(ctx):
     """
     if not ctx.invoked_subcommand:
         # list apps
-        region = ctx.obj['region']
-        vpc = ctx.obj['vpc']
+        region = ctx.obj.region
+        vpc = ctx.obj.vpc
 
         conn = boto.ec2.connect_to_region(region)
 
@@ -273,7 +276,7 @@ def versions(ctx):
     """
     if not ctx.invoked_subcommand:
         # list apps
-        region = ctx.obj['region']
+        region = ctx.obj.region
 
         autoscale = boto.ec2.autoscale.connect_to_region(region)
         groups = autoscale.get_all_groups()
@@ -327,8 +330,8 @@ def instances(ctx):
     Manage application instances, list all instances
     """
     if not ctx.invoked_subcommand:
-        region = ctx.obj['region']
-        vpc = ctx.obj['vpc']
+        region = ctx.obj.region
+        vpc = ctx.obj.vpc
 
         conn = boto.ec2.connect_to_region(region)
 
@@ -358,8 +361,8 @@ def traffic(ctx, application_name, application_version, percentage: int):
     """
     Set the percentage of the traffic for a single application version
     """
-    region = ctx.obj['region']
-    domain = ctx.obj['domain']
+    region = ctx.obj.region
+    domain = ctx.obj.domain
 
     if not domain:
         raise ValueError('Missing DNS domain setting')
@@ -458,7 +461,7 @@ def scale(ctx, application_name, application_version, desired_instances: int):
     """
     Scale an application version (set desired instance count)
     """
-    region = ctx.obj['region']
+    region = ctx.obj.region
 
     conn = boto.ec2.connect_to_region(region)
 
@@ -486,7 +489,7 @@ def delete_version(ctx, application_name: str, application_version: str):
     """
     Delete an application version and shutdown all associated instances
     """
-    region = ctx.obj['region']
+    region = ctx.obj.region
 
     conn = boto.ec2.connect_to_region(region)
 
@@ -563,21 +566,6 @@ def generate_env_options(env_vars: dict):
     return ' '.join(options)
 
 
-def load_credentials():
-    credentials_map = dict()
-    credentials_path = os.path.expanduser('~/.aws/credentials')
-
-    if os.path.exists(credentials_path):
-        with open(credentials_path) as fd:
-            for line in fd:
-                name, var = line.partition("=")[::2]
-                credentials_map[name.strip()] = var.strip()
-    else:
-        error('COULD NOT FIND FILE ~/.aws/credentials , ABORTING')
-
-    return credentials_map
-
-
 def prepare_log_shipper_script(application_name, application_version, data):
     if not data.get('loggly_auth_token'):
         return ''
@@ -648,8 +636,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     Create a new application version
     """
 
-    region = ctx.obj['region']
-    vpc = ctx.obj['vpc']
+    region = ctx.obj.region
+    vpc = ctx.obj.vpc
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
@@ -794,8 +782,8 @@ def create(ctx, manifest_file):
 
     validate_application_name(ctx, 'manifest-file', application_name)
 
-    region = ctx.obj['region']
-    vpc = ctx.obj['vpc']
+    region = ctx.obj.region
+    vpc = ctx.obj.vpc
 
     conn = boto.ec2.connect_to_region(region)
 
@@ -874,7 +862,7 @@ def delete(ctx, application_name: str):
     """
     Delete an application
     """
-    region = ctx.obj['region']
+    region = ctx.obj.region
 
     conn = boto.ec2.connect_to_region(region)
     sg, manifest = get_app_security_group_manifest(conn, application_name)
