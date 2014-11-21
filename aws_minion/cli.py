@@ -83,6 +83,14 @@ def generate_random_name(prefix: str, size: int) -> str:
     return '{}%0{}x'.format(prefix, size) % random.randrange(16 ** size)
 
 
+def generate_dns_recordset_identifier(application_name: str, application_version: str) -> str:
+    return '{}{}-{}'.format(PREFIX, application_name, application_version.replace('.', '-'))
+
+
+def generate_autoscase_identifier(application_name: str, application_version: str) -> str:
+    return '{}{}-{}'.format(PREFIX, application_name, application_version)
+
+
 def modify_sg(c, group, rule, authorize=False, revoke=False):
     src_group = None
     if rule.src_group_name:
@@ -344,10 +352,11 @@ def instances(ctx):
 @versions.command()
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
+@click.argument('percentage', type=click.IntRange(0, 100, clamp=True))
 @click.pass_context
-def activate(ctx, application_name, application_version):
+def traffic(ctx, application_name, application_version, percentage: int):
     """
-    Activate a single application version (put it into the non-versioned LB)
+    Set the percentage of the traffic for a single application version
     """
     region = ctx.obj['region']
     domain = ctx.obj['domain']
@@ -355,30 +364,88 @@ def activate(ctx, application_name, application_version):
     if not domain:
         raise ValueError('Missing DNS domain setting')
 
-    conn = boto.ec2.connect_to_region(region)
+    ec2_conn = boto.ec2.connect_to_region(region)
+    sg, manifest = get_app_security_group_manifest(ec2_conn, application_name)
 
-    sg, manifest = get_app_security_group_manifest(conn, application_name)
+    identifier = generate_dns_recordset_identifier(application_name, application_version)
 
-    autoscale = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+    autoscale_conn = boto.ec2.autoscale.connect_to_region(region)
+    groups = autoscale_conn.get_all_groups(names=[generate_autoscase_identifier(application_name, application_version)])
 
     if not groups:
         raise Exception('Autoscaling group for application version not found')
 
-    elb_conn = boto.ec2.elb.connect_to_region(region)
-
-    action('Add CNAME record..')
     dns_conn = boto.route53.connect_to_region(region)
     zone = dns_conn.get_zone(domain + '.')
     dns_name = '{}.{}.'.format(application_name, domain)
+
+    elb_conn = boto.ec2.elb.connect_to_region(region)
+    lb = elb_conn.get_all_load_balancers(load_balancer_names=[identifier])[0]
+    version_dns_name = lb.dns_name
+
     rr = zone.get_records()
 
-    lb = elb_conn.get_all_load_balancers(
-        load_balancer_names=['app-{}-{}'.format(application_name, application_version.replace('.', '-'))])[0]
+    partial_count = 0
+    partial_sum = 0
+    known_record_weights = {}
+    for r in rr:
+        if r.type == 'CNAME' and r.name == dns_name:
+            if r.weight:
+                w = int(r.weight)
+            else:
+                w = 0
+            known_record_weights[r.identifier] = w
+            if r.identifier != identifier:
+                partial_sum = partial_sum + w
+                partial_count = partial_count + 1
 
-    change = rr.add_change('UPSERT', dns_name, 'CNAME', ttl=60, weight=1)
-    change.add_value(lb.dns_name)
-    rr.commit()
+    if identifier not in known_record_weights:
+        known_record_weights[identifier] = 0
+
+    if partial_count:
+        delta = int((100 - percentage - partial_sum) / partial_count)
+    else:
+        delta = 0
+        # TODO: show a warning
+        percentage = 100
+
+    print(known_record_weights, {'delta': delta, 'partial_sum': partial_sum, 'partial_count': partial_count})
+
+    new_record_weights = {}
+    total_weight = 0
+    for i, w in known_record_weights.items():
+        if i == identifier:
+            n = percentage
+        else:
+            if percentage == 100:
+                n = 0
+            else:
+                n = int(max(1, w + delta))
+        new_record_weights[i] = n
+        total_weight = total_weight + n
+
+    print(new_record_weights, total_weight)
+
+    action('Setting weights..')
+    did_the_upsert = False
+    for r in rr:
+        if r.type == 'CNAME' and r.name == dns_name:
+            w = new_record_weights[r.identifier]
+            if w:
+                if int(r.weight) != w:
+                    r.weight = w
+                    rr.add_change_record('UPSERT', r)
+                if identifier == r.identifier:
+                    did_the_upsert = True
+            else:
+                rr.add_change_record('DELETE', r)
+
+    if percentage > 0 and not did_the_upsert:
+        change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=identifier, weight=percentage)
+        change.add_value(version_dns_name)
+
+    if rr.changes:
+        rr.commit()
     ok()
 
 
