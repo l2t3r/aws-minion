@@ -493,7 +493,7 @@ def delete_version(ctx, application_name: str, application_version: str):
 
     conn = boto.ec2.connect_to_region(region)
 
-    sg, manifest = get_app_security_group_manifest(conn, application_name)
+    ctx.obj.get_application(application_name)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
     groups = autoscale.get_all_groups(names=['app-{}-{}'.format(application_name, application_version)])
@@ -644,9 +644,9 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     conn = boto.ec2.connect_to_region(region)
 
-    sg_name = 'app-{}'.format(application_name)
+    app = ctx.obj.get_application(application_name)
 
-    sg, manifest = get_app_security_group_manifest(conn, application_name)
+    sg, manifest = app.security_group, app.manifest
 
     env_vars = {}
 
@@ -654,7 +654,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         key, value = key_value.split('=', 1)
         env_vars[key] = value
 
-    key_name = sg_name
+    key_name = app.identifier
 
     log_shipper_script = prepare_log_shipper_script(application_name, application_version, ctx.obj.config)
 
@@ -688,7 +688,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                              security_groups=[sg.id],
                              user_data=init_script.encode('utf-8'),
                              instance_type=manifest.get('instance_type', 't2.micro'),
-                             instance_profile_name=sg_name,
+                             instance_profile_name=app.identifier,
                              associate_public_ip_address=True)
     autoscale.create_launch_configuration(lc)
     ok()
