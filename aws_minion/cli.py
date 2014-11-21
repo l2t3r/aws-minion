@@ -275,43 +275,29 @@ def versions(ctx):
     Manage application versions, list all versions
     """
     if not ctx.invoked_subcommand:
-        # list apps
-        region = ctx.obj.region
-
-        autoscale = boto.ec2.autoscale.connect_to_region(region)
-        groups = autoscale.get_all_groups()
         rows = []
-        for group in groups:
-            if group.name.startswith(PREFIX):
-                # TODO: version MUST NOT contain any dash "-"
-                application_name, application_version = group.name[len(PREFIX):].rsplit('-', 1)
+        for version in ctx.obj.get_versions():
 
-                tags = {}
-                for tag in group.tags:
-                    tags[tag.key] = tag.value
+            lb = version.get_load_balancer()
+            if lb:
+                dns_name = lb.dns_name
+                counter = collections.Counter(i.state for i in lb.get_instance_health())
+            else:
+                dns_name = ''
+                counter = collections.Counter()
 
-                elb_conn = boto.ec2.elb.connect_to_region(region)
+            instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
 
-                try:
-                    lb = elb_conn.get_all_load_balancers(load_balancer_names=[group.name.replace('.', '-')])[0]
-                    dns_name = lb.dns_name
-                    counter = collections.Counter(i.state for i in lb.get_instance_health())
-                except:
-                    dns_name = ''
-                    counter = collections.Counter()
+            if not instance_states:
+                instance_states = '(no instances)'
 
-                instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
-
-                if not instance_states:
-                    instance_states = '(no instances)'
-
-                rows.append({'application_name': application_name,
-                             'application_version': application_version,
-                             'docker_image': tags.get('DockerImage'),
-                             'instance_states': instance_states,
-                             'desired_capacity': group.desired_capacity,
-                             'dns_name': dns_name,
-                             'created_time': parse_time(group.created_time)})
+            rows.append({'application_name': version.application_name,
+                         'application_version': version.version,
+                         'docker_image': version.docker_image,
+                         'instance_states': instance_states,
+                         'desired_capacity': version.auto_scaling_group.desired_capacity,
+                         'dns_name': dns_name,
+                         'created_time': parse_time(version.auto_scaling_group.created_time)})
 
         rows.sort(key=lambda x: (x['application_name'], x['application_version']))
         print_table(('application_name application_version ' +
@@ -330,23 +316,16 @@ def instances(ctx):
     Manage application instances, list all instances
     """
     if not ctx.invoked_subcommand:
-        region = ctx.obj.region
-        vpc = ctx.obj.vpc
-
-        conn = boto.ec2.connect_to_region(region)
-
-        instances = conn.get_only_instances()
         rows = []
-        for instance in instances:
-            if 'Name' in instance.tags and instance.tags['Name'].startswith('app-') and instance.vpc_id == vpc:
-                application_name, application_version = parse_instance_name(instance.tags['Name'])
-                rows.append({'application_name': application_name,
-                             'application_version': application_version,
-                             'instance_id': instance.id,
-                             'team': instance.tags.get('Team', ''),
-                             'ip_address': instance.ip_address,
-                             'state': instance.state.upper(),
-                             'launch_time': parse_time(instance.launch_time)})
+        for instance in ctx.obj.get_instances():
+            application_name, application_version = parse_instance_name(instance.tags['Name'])
+            rows.append({'application_name': application_name,
+                         'application_version': application_version,
+                         'instance_id': instance.id,
+                         'team': instance.tags.get('Team', ''),
+                         'ip_address': instance.ip_address,
+                         'state': instance.state.upper(),
+                         'launch_time': parse_time(instance.launch_time)})
         now = time.time()
         rows.sort(key=lambda x: (x['application_name'], x['application_version'], now - x['launch_time']))
         print_table('application_name application_version instance_id team ip_address state launch_time'.split(), rows)
