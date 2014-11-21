@@ -347,8 +347,7 @@ def traffic(ctx, application_name, application_version, percentage: int):
     if not domain:
         raise ValueError('Missing DNS domain setting')
 
-    ec2_conn = boto.ec2.connect_to_region(region)
-    sg, manifest = get_app_security_group_manifest(ec2_conn, application_name)
+    ctx.obj.get_application(application_name)
 
     identifier = generate_dns_recordset_identifier(application_name, application_version)
 
@@ -439,14 +438,12 @@ def scale(ctx, application_name, application_version, desired_instances: int):
     """
     region = ctx.obj.region
 
-    conn = boto.ec2.connect_to_region(region)
-
-    sg, manifest = get_app_security_group_manifest(conn, application_name)
+    ctx.obj.get_application(application_name)
 
     action('Scaling application {application_name} version {application_version} to {desired_instances} instances',
            **vars())
     autoscale = boto.ec2.autoscale.connect_to_region(region)
-    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(manifest['application_name'], application_version)])
+    groups = autoscale.get_all_groups(names=['app-{}-{}'.format(application_name, application_version)])
 
     if not groups:
         raise Exception('Autoscaling group for application version not found')
@@ -689,19 +686,19 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     action('Creating load blanacer for {application_name} version {application_version}..', **vars())
     ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer('app-{}-{}'.format(manifest['application_name'],
+    lb = elb_conn.create_load_balancer('app-{}-{}'.format(application_name,
                                                           application_version.replace('.', '-')), zones=None,
                                        listeners=ports,
                                        subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
     lb.configure_health_check(hc)
     ok()
 
-    group_name = 'app-{}-{}'.format(manifest['application_name'], application_version)
+    group_name = 'app-{}-{}'.format(application_name, application_version)
 
     action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
                           load_balancers=[
-                              'app-{}-{}'.format(manifest['application_name'], application_version.replace('.', '-'))],
+                              'app-{}-{}'.format(application_name, application_version.replace('.', '-'))],
                           availability_zones=[subnet.availability_zone for subnet in subnets],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
