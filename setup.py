@@ -26,7 +26,7 @@ def read_version(package):
 NAME = 'aws-minion'
 MAIN_PACKAGE = 'aws_minion'
 VERSION = read_version(MAIN_PACKAGE)
-DESCRIPTION = 'aws-minion'
+DESCRIPTION = 'Manage Immutable Docker Application Stacks on EC2 with ELB and Route 53'
 LICENSE = 'Apache License 2.0'
 URL = 'https://github.com/zalando/aws-minion'
 AUTHOR = 'Henning Jacobs'
@@ -196,7 +196,7 @@ def setup_package():
         author=AUTHOR,
         author_email=EMAIL,
         license=LICENSE,
-        keywords='aws-minion',
+        keywords='aws docker ec2 elb lb boto deployment route53 stack traffic',
         long_description=read('README.rst'),
         classifiers=CLASSIFIERS,
         test_suite='tests',

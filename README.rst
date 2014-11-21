@@ -2,6 +2,7 @@
 AWS Minion
 ==========
 
+AWS Minion manages immutable Docker application stacks on Amazon EC2 instances with ELB and Route 53.
 
 Installing
 ==========
