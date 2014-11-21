@@ -47,10 +47,13 @@ Example run:
     $ minion ver activate myapp 0.1
 
 
-CLI
-===
+Running Unit Tests
+==================
 
-minion module1 submoduleX commandY param1 param2 ..
+.. code-block:: bash
+
+    $ python3 setup.py test   # run unit tests
+    $ python3 setup.py flake8 # check code formatting
 
 
 Workflow
