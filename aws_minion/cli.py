@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from distutils.version import LooseVersion
 import shlex
 from textwrap import dedent
 import boto.vpc
@@ -24,6 +25,7 @@ import yaml
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 from aws_minion.console import print_table, action, ok, error
 from aws_minion.context import Context
+from aws_minion.utils import FloatRange
 
 AMI_ID = 'ami-f0b11187'
 
@@ -292,7 +294,7 @@ def versions(ctx):
                          'weight': version.weight,
                          'created_time': parse_time(version.auto_scaling_group.created_time)})
 
-        rows.sort(key=lambda x: (x['application_name'], x['application_version']))
+        rows.sort(key=lambda x: (x['application_name'], LooseVersion(x['application_version'])))
         print_table(('application_name application_version ' +
                      'docker_image instance_states desired_capacity weight created_time').split(), rows)
 
@@ -320,14 +322,18 @@ def instances(ctx):
                          'state': instance.state.upper(),
                          'launch_time': parse_time(instance.launch_time)})
         now = time.time()
-        rows.sort(key=lambda x: (x['application_name'], x['application_version'], now - x['launch_time']))
+        rows.sort(key=lambda x: (x['application_name'], LooseVersion(x['application_version']), now - x['launch_time']))
         print_table('application_name application_version instance_id team ip_address state launch_time'.split(), rows)
+
+
+PERCENT_RESOLUTION = 1
+FULL_PERCENTAGE = PERCENT_RESOLUTION * 100
 
 
 @versions.command()
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
-@click.argument('percentage', type=click.IntRange(0, 100, clamp=True))
+@click.argument('percentage', type=FloatRange(0, 100, clamp=True))
 @click.pass_context
 def traffic(ctx, application_name, application_version, percentage: int):
     """
@@ -335,6 +341,7 @@ def traffic(ctx, application_name, application_version, percentage: int):
     """
     region = ctx.obj.region
     domain = ctx.obj.domain
+    percentage = int(percentage * PERCENT_RESOLUTION)
 
     version = ctx.obj.get_version(application_name, application_version)
 
@@ -359,18 +366,18 @@ def traffic(ctx, application_name, application_version, percentage: int):
                 w = 0
             known_record_weights[r.identifier] = w
             if r.identifier != identifier:
-                partial_sum = partial_sum + w
-                partial_count = partial_count + 1
+                partial_sum += w
+                partial_count += 1
 
     if identifier not in known_record_weights:
         known_record_weights[identifier] = 0
 
     if partial_count:
-        delta = int((100 - percentage - partial_sum) / partial_count)
+        delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
     else:
         delta = 0
         # TODO: show a warning
-        percentage = 100
+        percentage = int(FULL_PERCENTAGE)
 
     new_record_weights = {}
     total_weight = 0
@@ -378,12 +385,45 @@ def traffic(ctx, application_name, application_version, percentage: int):
         if i == identifier:
             n = percentage
         else:
-            if percentage == 100:
+            if percentage == FULL_PERCENTAGE:
+                # other versions should be disabled if 100% of traffic is ordered for our version
                 n = 0
             else:
-                n = int(max(1, w + delta))
+                if w > 0:
+                    # if old weight is not zero
+                    # do not allow it to be pushed below 1
+                    n = int(max(1, w + delta))
+                else:
+                    # this should not happen, but just in case
+                    n = 0
         new_record_weights[i] = n
-        total_weight = total_weight + n
+        total_weight += n
+
+    calculation_error = FULL_PERCENTAGE - total_weight
+
+    if calculation_error:
+        # distribute the error on the versions, other then the current one
+        part = calculation_error/partial_count
+        if part > 0:
+            part = int(max(1, part))
+        else:
+            part = int(min(-1, part))
+        for i in sorted(new_record_weights.keys()):
+            if i == identifier:
+                continue
+            new_record_weights[i] += part
+            calculation_error -= part
+            if calculation_error == 0:
+                break
+        assert(calculation_error == 0)
+
+    print_table('identifier old_weight new_weight'.split(),
+                sorted([
+                    {'identifier': i,
+                     'old_weight': known_record_weights[i],
+                     'new_weight': new_record_weights[i]
+                     } for i in known_record_weights.keys()
+                ], key=lambda x: x['identifier']))
 
     action('Setting weights..')
     did_the_upsert = False
@@ -391,8 +431,8 @@ def traffic(ctx, application_name, application_version, percentage: int):
         if r.type == 'CNAME' and r.name == dns_name:
             w = new_record_weights[r.identifier]
             if w:
-                if int(r.weight) != w:
-                    r.weight = w
+                if int(r.weight) != w * PERCENT_RESOLUTION:
+                    r.weight = w * PERCENT_RESOLUTION
                     rr.add_change_record('UPSERT', r)
                 if identifier == r.identifier:
                     did_the_upsert = True

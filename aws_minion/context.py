@@ -1,6 +1,7 @@
-
+from distutils.version import LooseVersion
 import boto.ec2
 from boto.ec2.elb import LoadBalancer
+import functools
 import yaml
 
 IDENTIFIER_PREFIX = 'app-'
@@ -27,6 +28,7 @@ class Application:
         return IDENTIFIER_PREFIX + self.name
 
 
+@functools.total_ordering
 class ApplicationVersion:
 
     def __init__(self, region: str, application_name: str, version: str, auto_scaling_group):
@@ -59,6 +61,13 @@ class ApplicationVersion:
             return lb
         except:
             return None
+
+    def __lt__(self, other):
+        key = lambda v: (v.application_name, LooseVersion(self.version), )
+        return key(self) < key(other)
+
+    def __eq__(self, other):
+        return self.application_name == other.application_name and self.version == other.version
 
 
 class ApplicationInstance:
@@ -121,7 +130,7 @@ class Context:
                 version = ApplicationVersion(self.region, _application_name, _application_version, group)
                 version.weight = weights.get(version.dns_identifier)
                 rows.append(version)
-        return rows
+        return sorted(rows)
 
     def get_version(self, application_name, application_version):
         versions = self.get_versions(application_name, application_version)
