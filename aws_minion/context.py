@@ -24,7 +24,7 @@ class Application:
             raise Exception('Application not found')
 
     @property
-    def identifier(self):
+    def identifier(self) -> str:
         return IDENTIFIER_PREFIX + self.name
 
 
@@ -43,15 +43,15 @@ class ApplicationVersion:
             self.tags[tag.key] = tag.value
 
     @property
-    def identifier(self):
+    def identifier(self) -> str:
         return '{}{}-{}'.format(IDENTIFIER_PREFIX, self.application_name, self.version)
 
     @property
-    def dns_identifier(self):
+    def dns_identifier(self) -> str:
         return self.identifier.replace('.', '-')
 
     @property
-    def docker_image(self):
+    def docker_image(self) -> str:
         return self.tags.get('DockerImage')
 
     def get_load_balancer(self) -> LoadBalancer:
@@ -103,7 +103,10 @@ class Context:
         app = Application(application_name, conn)
         return app
 
-    def get_versions(self, application_name=None, application_version=None) -> list:
+    def get_versions(self, application_name: str=None, application_version: str=None) -> [ApplicationVersion]:
+        """
+        Get all versions defined for the given application_name and application_version strings.
+        """
         autoscale = boto.ec2.autoscale.connect_to_region(self.region)
         groups = autoscale.get_all_groups()
         rows = []
@@ -132,14 +135,14 @@ class Context:
                 rows.append(version)
         return sorted(rows)
 
-    def get_version(self, application_name, application_version):
+    def get_version(self, application_name: str, application_version: str) -> ApplicationVersion:
         versions = self.get_versions(application_name, application_version)
         if not versions:
             raise Exception('Version {application_version} of application {application_name} not found'.format(
                             **vars()))
         return versions[0]
 
-    def get_instances(self) -> list:
+    def get_instances(self) -> [ApplicationInstance]:
         conn = boto.ec2.connect_to_region(self.region)
         instances = conn.get_only_instances()
         res = []

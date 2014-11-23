@@ -24,12 +24,16 @@ def action(msg, **kwargs):
     click.secho(msg.format(**kwargs), nl=False, bold=True)
 
 
-def ok(**kwargs):
-    click.secho(' OK', fg='green', bold=True, **kwargs)
+def ok(msg=' OK', **kwargs):
+    click.secho(msg, fg='green', bold=True, **kwargs)
 
 
 def error(msg, **kwargs):
     click.secho(' {}'.format(msg), fg='red', bold=True, **kwargs)
+
+
+def warning(msg, **kwargs):
+    click.secho(' {}'.format(msg), fg='green', bold=True, **kwargs)
 
 
 def format_time(ts):
