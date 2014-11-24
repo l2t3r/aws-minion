@@ -2,6 +2,10 @@
 AWS Minion
 ==========
 
+.. image:: https://travis-ci.org/zalando/aws-minion.svg?branch=master
+   :target: https://travis-ci.org/zalando/aws-minion
+   :alt: Build Status
+
 .. image:: https://readthedocs.org/projects/aws-minion/badge/?version=latest
    :target: https://readthedocs.org/projects/aws-minion/?badge=latest
    :alt: Documentation Status
