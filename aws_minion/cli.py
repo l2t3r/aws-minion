@@ -846,21 +846,21 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     # calculate max number of iterations corresponding to the max time range after which AWS declares
     # a member as 'OutOfService'
     max_wait_time = UNHEALTHY_THRESHOLD * (HEALTH_CHECK_TIMEOUT_IN_S + HEALTH_CHECK_INTERVAL_IN_S)
-    max_iterations = (max_wait_time / SLEEP_TIME_IN_S)  + 1
+    max_iterations = (max_wait_time / SLEEP_TIME_IN_S) + 1
 
     j = 0
     while not [i.state for i in lb.get_instance_health() if i.state == 'InService']:
         if j == max_iterations:
-           break
+            break
         time.sleep(SLEEP_TIME_IN_S)
         click.secho(' .', nl=False)
         j += 1
-    
+
     if j == max_iterations:
-       error('ABORTED. Default health check time to wait for members to become active has been exceeded.' +
-             ' There might be a problem with your application')
+        error('ABORTED. Default health check time to wait for members to become active has been exceeded.' +
+              ' There might be a problem with your application')
     else:
-       ok()
+        ok()
 
 
 @applications.command()
