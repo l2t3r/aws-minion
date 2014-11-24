@@ -3,6 +3,7 @@ AWS Minion
 ==========
 
 AWS Minion manages immutable Docker application stacks on Amazon EC2 instances with ELB and Route 53.
+See the `AWS Minion Documentation on Read the Docs`_.
 
 Installing
 ==========
@@ -66,40 +67,6 @@ Building HTML documentation locally:
 .. code-block:: bash
 
     $ python3 setup.py docs
-
-
-Workflow
-========
-
-* Write application manifest as .yaml file
-* Create/register application ``minion app[lications] create mymanifest.yaml``
-
-  * Create security group(s)
-  * Registers application in registry (if there, right now storing manifest in tag on security group)
-
-* Push Docker image to your favorite Docker registry
-* Register application version ``minion ver[sions] create my-app 0.1 hjacobs/my-app`` (this would use Docker Hub)
-
-  * Create autoscaling group and ELB
-  * Start at least one instance (without getting traffic)
-
-* ``minion ver[sions] activate my-app 0.1``
-
-  * Update DNS to point to version LB
-
-
-Manifest
-========
-
-.. code-block:: yaml
-
-    ---
-    application_name: my-app
-    team_name: MyTeam/SubTeam
-    accessible_by:
-        - my-other-app
-        - another-app
-    exposed_ports: [80]
 
 
 ToDos
