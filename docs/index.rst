@@ -6,6 +6,8 @@ Contents:
 .. toctree::
    :maxdepth: 2
 
+    Basic Concepts <concepts>
+
 
 
 Indices and tables
