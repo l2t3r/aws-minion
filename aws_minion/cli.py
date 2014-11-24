@@ -30,7 +30,8 @@ from aws_minion.utils import FloatRange
 
 AMI_ID = 'ami-f0b11187'
 
-CONFIG_FILE_PATH = '~/.aws-minion.yaml'
+CONFIG_DIR_PATH = click.get_app_dir('aws-minion')
+CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, '.aws-minion.yaml')
 AWS_CREDENTIALS_PATH = '~/.aws/credentials'
 APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
 # NOTE: version MUST not contain any dash ("-")
@@ -152,9 +153,9 @@ def configure(ctx, region, vpc, domain):
     Configure the AWS connection settings
     """
     param_data = {'region': region, 'vpc': vpc, 'domain': domain}
-    path = os.path.expanduser(CONFIG_FILE_PATH)
-    if os.path.exists(path):
-        with open(path, 'rb') as fd:
+    os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
+    if os.path.exists(CONFIG_FILE_PATH):
+        with open(CONFIG_FILE_PATH, 'rb') as fd:
             data = yaml.safe_load(fd)
     else:
         data = {}
@@ -227,7 +228,7 @@ def configure(ctx, region, vpc, domain):
         return
     ok()
 
-    with open(path, 'w', encoding='utf-8') as fd:
+    with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
         fd.write(yaml.dump(data))
     ctx.obj = Context(data)
 
