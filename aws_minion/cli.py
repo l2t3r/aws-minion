@@ -725,7 +725,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         target='HTTP:{}{}'.format(manifest['exposed_ports'][0], manifest.get('health_check_http_path', '/'))
     )
 
-    action('Creating load blanacer for {application_name} version {application_version}..', **vars())
+    action('Creating load balancer for {application_name} version {application_version}..', **vars())
     ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
     lb = elb_conn.create_load_balancer('app-{}-{}'.format(application_name,
