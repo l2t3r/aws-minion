@@ -585,6 +585,14 @@ def prepare_log_shipper_script(application_name, application_version, data):
            exit 1
         fi
 
+        mkdir -pv /etc/rsyslog.d/keys/ca.d
+        cd /etc/rsyslog.d/keys/ca.d/
+        wget https://logdog.loggly.com/media/loggly.com.crt
+        wget https://certs.starfieldtech.com/repository/sf_bundle.crt
+        cat {{sf_bundle.crt,loggly.com.crt}} > loggly_full.crt
+        rm {{sf_bundle.crt,loggly.com.crt}}
+        cd
+
         currentDockerFile=/var/lib/docker/containers/$containerId/$containerId-json.log
 
         ln $currentDockerFile $LOG_FILE
@@ -593,27 +601,45 @@ def prepare_log_shipper_script(application_name, application_version, data):
         f=/etc/rsyslog.d/22-loggly.conf
 
         # Define the template used for sending logs to Loggly. Do not change this format.
-        echo '$template LogglyFormat,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% \
-%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"system\\"] %msg%\\n"' > $f
-        echo '*.* @@logs-01.loggly.com:514;LogglyFormat' >> $f
+        (
+            echo '$template LogglyFormat,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% \
+%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"system\\" tag=\\"TLS\\"] %msg%\\n"'
+            echo '#RsyslogGnuTLS'
+            echo '$DefaultNetstreamDriverCAFile /etc/rsyslog.d/keys/ca.d/loggly_full.crt'
+            echo '$ActionSendStreamDriver gtls'
+            echo '$ActionSendStreamDriverMode 1'
+            echo '$ActionSendStreamDriverAuthMode x509/name'
+            echo '$ActionSendStreamDriverPermittedPeer *.loggly.com'
+            echo '*.* @@logs-01.loggly.com:6514;LogglyFormat'
+        ) > $f
 
         f=/etc/rsyslog.d/21-filemonitoring-{application_name}-{application_version}.conf
-        echo '$ModLoad imfile' > $f
-        echo '$InputFilePollInterval 10' >> $f
-        echo '$WorkDirectory /var/spool/rsyslog' >> $f
-        echo '$PrivDropToGroup adm' >> $f
-        echo '$InputFileName /var/log/docker.log' >> $f
-        echo '$InputFileTag {application_name}-{application_version}:' >> $f
-        echo '$InputFileStateFile stat-{application_name}-{application_version}' >> $f
-        echo '$InputFileSeverity info' >> $f
-        echo '$InputFilePersistStateInterval 20000' >> $f
-        echo '$InputRunFileMonitor' >> $f
-        echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
+        (
+            echo '$ModLoad imfile'
+            echo '$InputFilePollInterval 10'
+            echo '$WorkDirectory /var/spool/rsyslog'
+            echo '$PrivDropToGroup adm'
+            echo '$InputFileName /var/log/docker.log'
+            echo '$InputFileTag {application_name}-{application_version}:'
+            echo '$InputFileStateFile stat-{application_name}-{application_version}'
+            echo '$InputFileSeverity info'
+            echo '$InputFilePersistStateInterval 20000'
+            echo '$InputRunFileMonitor'
+            echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
 %timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% \
-[{loggly_auth_token}@41058 tag=\\"file\\"] %msg%\\n"' >> $f
-        echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then \
-@@logs-01.loggly.com:514;LogglyFormatFile{application_name}-{application_version}' >> $f
-        echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then stop' >> $f
+[{loggly_auth_token}@41058 tag=\\"file\\" tag=\\"TLS\\"] %msg%\\n"'
+            echo '#RsyslogGnuTLS'
+            echo '$DefaultNetstreamDriverCAFile /etc/rsyslog.d/keys/ca.d/loggly_full.crt'
+            echo '$ActionSendStreamDriver gtls'
+            echo '$ActionSendStreamDriverMode 1'
+            echo '$ActionSendStreamDriverAuthMode x509/name'
+            echo '$ActionSendStreamDriverPermittedPeer *.loggly.com'
+            echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then \
+@@logs-01.loggly.com:6514;LogglyFormatFile{application_name}-{application_version}'
+            echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then stop'
+        ) > $f
+
+
 
         service rsyslog restart
         ''').format(application_name=application_name,
@@ -665,7 +691,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     apt-get update
 
     # Docker
-    apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker
+    apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker rsyslog-gnutls
 
     containerId=$(docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image})
 
