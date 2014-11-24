@@ -147,12 +147,13 @@ def cli(ctx):
 @click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
 @click.option('--vpc', help='AWS VPC ID', prompt='AWS VPC ID (e.g. "vpc-abcd1234")', callback=validate_vpc_id)
 @click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
+@click.option('--ssl-certificate-arn', help='SSL certificate ARN (e.g. arn:aws:iam::123:server-certificate/mycert)')
 @click.pass_context
-def configure(ctx, region, vpc, domain):
+def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     """
     Configure the AWS connection settings
     """
-    param_data = {'region': region, 'vpc': vpc, 'domain': domain}
+    param_data = {'region': region, 'vpc': vpc, 'domain': domain, 'ssl_certificate_arn': ssl_certificate_arn}
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
     if os.path.exists(CONFIG_FILE_PATH):
         with open(CONFIG_FILE_PATH, 'rb') as fd:
@@ -727,7 +728,11 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     )
 
     action('Creating load balancer for {application_name} version {application_version}..', **vars())
-    ports = [(80, manifest['exposed_ports'][0], 'http')]
+    ssl_cert_arn = ctx.obj.config.get('ssl_certificate_arn')
+    if ssl_cert_arn:
+        ports = [(443, manifest['exposed_ports'][0], 'https', ssl_cert_arn)]
+    else:
+        ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
     lb_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
     lb = elb_conn.create_load_balancer(lb_name, zones=None, listeners=ports,

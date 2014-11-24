@@ -29,6 +29,7 @@ You need to enter:
 * AWS region ID
 * AWS VPC ID
 * Route 53 domain name
+* SSL Certificate ARN (optional, for HTTPS ELB)
 * AWS credentials (if you haven't used ``aws`` CLI before)
 * Loggly credentials (optional)
 
