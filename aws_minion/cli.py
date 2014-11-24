@@ -722,7 +722,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         interval=20,
         healthy_threshold=3,
         unhealthy_threshold=5,
-        target='HTTP:{}/'.format(manifest['exposed_ports'][0])
+        target='HTTP:{}{}'.format(manifest['exposed_ports'][0], manifest.get('health_check_http_path', '/'))
     )
 
     action('Creating load blanacer for {application_name} version {application_version}..', **vars())
