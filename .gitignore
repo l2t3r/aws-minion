@@ -6,6 +6,7 @@ junit.xml
 *.pyc
 __pycache__
 build
+_build
 dist
 .idea
 htmlcov
