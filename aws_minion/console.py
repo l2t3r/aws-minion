@@ -97,7 +97,7 @@ def print_table(cols, rows):
                     style = {'fg': 'green', 'bold': True}
                 elif diff < 3600:
                     style = {'fg': 'green'}
-            elif isinstance(val, int):
+            elif isinstance(val, int) or isinstance(val, float):
                 align = '>'
             val = format(col, val)
 

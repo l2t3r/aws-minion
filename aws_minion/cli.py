@@ -30,7 +30,8 @@ from aws_minion.utils import FloatRange
 
 AMI_ID = 'ami-f0b11187'
 
-CONFIG_FILE_PATH = '~/.aws-minion.yaml'
+CONFIG_DIR_PATH = click.get_app_dir('aws-minion')
+CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'aws-minion.yaml')
 AWS_CREDENTIALS_PATH = '~/.aws/credentials'
 APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
 # NOTE: version MUST not contain any dash ("-")
@@ -152,15 +153,16 @@ def cli(ctx):
 @click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
 @click.option('--vpc', help='AWS VPC ID', prompt='AWS VPC ID (e.g. "vpc-abcd1234")', callback=validate_vpc_id)
 @click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
+@click.option('--ssl-certificate-arn', help='SSL certificate ARN (e.g. arn:aws:iam::123:server-certificate/mycert)')
 @click.pass_context
-def configure(ctx, region, vpc, domain):
+def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     """
     Configure the AWS connection settings
     """
-    param_data = {'region': region, 'vpc': vpc, 'domain': domain}
-    path = os.path.expanduser(CONFIG_FILE_PATH)
-    if os.path.exists(path):
-        with open(path, 'rb') as fd:
+    param_data = {'region': region, 'vpc': vpc, 'domain': domain, 'ssl_certificate_arn': ssl_certificate_arn}
+    os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
+    if os.path.exists(CONFIG_FILE_PATH):
+        with open(CONFIG_FILE_PATH, 'rb') as fd:
             data = yaml.safe_load(fd)
     else:
         data = {}
@@ -233,7 +235,7 @@ def configure(ctx, region, vpc, domain):
         return
     ok()
 
-    with open(path, 'w', encoding='utf-8') as fd:
+    with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
         fd.write(yaml.dump(data))
     ctx.obj = Context(data)
 
@@ -791,15 +793,18 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         interval=20,
         healthy_threshold=3,
         unhealthy_threshold=5,
-        target='HTTP:{}/'.format(manifest['exposed_ports'][0])
+        target='HTTP:{}{}'.format(manifest['exposed_ports'][0], manifest.get('health_check_http_path', '/'))
     )
 
-    action('Creating load blanacer for {application_name} version {application_version}..', **vars())
-    ports = [(80, manifest['exposed_ports'][0], 'http')]
+    action('Creating load balancer for {application_name} version {application_version}..', **vars())
+    ssl_cert_arn = ctx.obj.config.get('ssl_certificate_arn')
+    if ssl_cert_arn:
+        ports = [(443, manifest['exposed_ports'][0], 'https', ssl_cert_arn)]
+    else:
+        ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer('app-{}-{}'.format(application_name,
-                                                          application_version.replace('.', '-')), zones=None,
-                                       listeners=ports,
+    lb_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
+    lb = elb_conn.create_load_balancer(lb_name, zones=None, listeners=ports,
                                        subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
     lb.configure_health_check(hc)
     ok()
@@ -808,8 +813,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
-                          load_balancers=[
-                              'app-{}-{}'.format(application_name, application_version.replace('.', '-'))],
+                          load_balancers=[lb_name],
                           availability_zones=[subnet.availability_zone for subnet in subnets],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
