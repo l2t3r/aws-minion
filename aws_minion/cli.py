@@ -46,6 +46,11 @@ SecurityGroupRule = collections.namedtuple("SecurityGroupRule",
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
+# Default instance health check configuration in AWS
+HEALTH_CHECK_TIMEOUT_IN_S  = 5
+HEALTH_CHECK_INTERVAL_IN_S = 20
+UNHEALTHY_THRESHOLD        = 5
+SLEEP_TIME_IN_S            = 5;
 
 def validate_application_name(ctx, param, value):
     match = APPLICATION_NAME_PATTERN.match(value)
@@ -773,10 +778,24 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     ok()
 
     action('Waiting for LB members to become active..')
+
+    # calculate max number of iterations corresponding to the max time range after which AWS declares 
+    # a member as 'OutOfService'
+    max_wait_time  = UNHEALTHY_THRESHOLD * ( HEALTH_CHECK_TIMEOUT_IN_S + HEALTH_CHECK_INTERVAL_IN_S ) 
+    max_iterations = ( max_wait_time / SLEEP_TIME_IN_S )  + 1     
+
+    i = 0
     while not [i.state for i in lb.get_instance_health() if i.state == 'InService']:
-        time.sleep(3)
+        if i == max_iterations:
+           break
+        time.sleep(SLEEP_TIME_IN_S)
         click.secho(' .', nl=False)
-    ok()
+        i += 1
+    
+    if i == max_iterations:
+       error('ABORTED. Default health check time to wait for members to become active has been exceeded. There might be a problem with your application')
+    else:
+       ok()
 
 
 @applications.command()
