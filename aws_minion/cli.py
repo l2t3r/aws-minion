@@ -683,7 +683,13 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     log_shipper_script = prepare_log_shipper_script(application_name, application_version, ctx.obj.config)
 
+    dns_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
+
     init_script = '''#!/bin/bash
+    iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+    iid=${{iid/i-}}
+    hostname {hostname}-$iid
+
     # add Docker repo
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
     echo 'deb https://get.docker.io/ubuntu docker main' > /etc/apt/sources.list.d/docker.list
@@ -698,6 +704,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
     '''.format(docker_image=docker_image,
+               hostname=dns_name,
                exposed_port=manifest['exposed_ports'][0],
                env_options=generate_env_options(env_vars),
                log_shipper_script=shlex.quote(log_shipper_script))
@@ -742,8 +749,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     else:
         ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
-    lb = elb_conn.create_load_balancer(lb_name, zones=None, listeners=ports,
+    lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
                                        subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
     lb.configure_health_check(hc)
     ok()
@@ -752,7 +758,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
-                          load_balancers=[lb_name],
+                          load_balancers=[dns_name],
                           availability_zones=[subnet.availability_zone for subnet in subnets],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
