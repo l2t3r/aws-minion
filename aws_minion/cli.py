@@ -31,7 +31,7 @@ from aws_minion.utils import FloatRange
 AMI_ID = 'ami-f0b11187'
 
 CONFIG_DIR_PATH = click.get_app_dir('aws-minion')
-CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, '.aws-minion.yaml')
+CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'aws-minion.yaml')
 AWS_CREDENTIALS_PATH = '~/.aws/credentials'
 APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
 # NOTE: version MUST not contain any dash ("-")
