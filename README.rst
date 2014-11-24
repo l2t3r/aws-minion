@@ -56,6 +56,18 @@ Running Unit Tests
     $ python3 setup.py flake8 # check code formatting
 
 
+Documentation
+=============
+
+See the `AWS Minion Documentation on Read the Docs`_.
+
+Building HTML documentation locally:
+
+.. code-block:: bash
+
+    $ python3 setup.py docs
+
+
 Workflow
 ========
 
@@ -94,3 +106,8 @@ ToDos
 =====
 
 * use SSL for ELB
+* use private and public subnets
+
+
+.. _AWS Minion Documentation on Read the Docs: http://aws-minion.readthedocs.org/
+
