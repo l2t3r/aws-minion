@@ -728,9 +728,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     action('Creating load balancer for {application_name} version {application_version}..', **vars())
     ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer('app-{}-{}'.format(application_name,
-                                                          application_version.replace('.', '-')), zones=None,
-                                       listeners=ports,
+    lb_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
+    lb = elb_conn.create_load_balancer(lb_name, zones=None, listeners=ports,
                                        subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
     lb.configure_health_check(hc)
     ok()
@@ -739,8 +738,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
-                          load_balancers=[
-                              'app-{}-{}'.format(application_name, application_version.replace('.', '-'))],
+                          load_balancers=[lb_name],
                           availability_zones=[subnet.availability_zone for subnet in subnets],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
