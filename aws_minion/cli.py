@@ -25,7 +25,7 @@ import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 from aws_minion.console import print_table, action, ok, error, warning
-from aws_minion.context import Context
+from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.utils import FloatRange
 
 AMI_ID = 'ami-f0b11187'
@@ -110,24 +110,6 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
                      to_port=rule.to_port,
                      cidr_ip=rule.cidr_ip,
                      src_group=src_group)
-
-
-class ApplicationNotFound(Exception):
-    def __init__(self, application_name):
-        self.application_name = application_name
-
-    def __str__(self):
-        return 'Application "{}" does not exist'.format(self.application_name)
-
-
-def get_app_security_group_manifest(conn, application_name: str):
-    all_security_groups = conn.get_all_security_groups()
-    sg_name = 'app-{}'.format(application_name)
-    for _sg in all_security_groups:
-        if _sg.name == sg_name:
-            manifest = yaml.safe_load(_sg.tags['Manifest'])
-            return _sg, manifest
-    raise ApplicationNotFound(application_name)
 
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
@@ -808,7 +790,7 @@ def create(ctx, manifest_file):
 
     action('Checking whether application {application_name} exists..', **vars())
     try:
-        sg, manifest = get_app_security_group_manifest(conn, application_name)
+        ctx.obj.get_application(application_name)
         error('ALREADY EXISTS, ABORTING')
         return
     except ApplicationNotFound:
@@ -884,7 +866,9 @@ def delete(ctx, application_name: str):
     region = ctx.obj.region
 
     conn = boto.ec2.connect_to_region(region)
-    sg, manifest = get_app_security_group_manifest(conn, application_name)
+    app = ctx.obj.get_application(application_name)
+
+    sg = app.security_group
 
     action('Deleting security group..')
     while True:

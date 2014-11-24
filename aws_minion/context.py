@@ -7,6 +7,14 @@ import yaml
 IDENTIFIER_PREFIX = 'app-'
 
 
+class ApplicationNotFound(Exception):
+    def __init__(self, application_name):
+        self.application_name = application_name
+
+    def __str__(self):
+        return 'Application "{}" does not exist'.format(self.application_name)
+
+
 class Application:
 
     def __init__(self, name: str, conn):
@@ -21,7 +29,7 @@ class Application:
                 self.manifest = yaml.safe_load(_sg.tags['Manifest'])
 
         if not self.security_group:
-            raise Exception('Application not found')
+            raise ApplicationNotFound(name)
 
     @property
     def identifier(self) -> str:
