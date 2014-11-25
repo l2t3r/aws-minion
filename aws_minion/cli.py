@@ -125,6 +125,24 @@ def cli(ctx):
     ctx.obj = Context(data)
 
 
+def ensure_aws_credentials():
+    credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
+    if not os.path.exists(credentials_path):
+        click.secho('AWS credentials file not found, please provide them now')
+        key_id = click.prompt('AWS Access Key ID')
+        secret = click.prompt('AWS Secret Access Key', hide_input=True)
+
+        os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
+
+        credentials_content = dedent('''\
+            [default]
+            aws_access_key_id     = {key_id}
+            aws_secret_access_key = {secret}
+            ''').format(key_id=key_id, secret=secret)
+        with open(credentials_path, 'w') as fd:
+            fd.write(credentials_content)
+
+
 @cli.command()
 @click.option('--region', help='AWS region ID')
 @click.option('--vpc', help='AWS VPC ID')
@@ -135,19 +153,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     """
     Configure the AWS and Loggly connection settings
     """
-    credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
-    if not os.path.exists(credentials_path):
-        click.secho('AWS credentials file not found, please provide them now')
-        key_id = click.prompt('AWS Access Key ID')
-        secret = click.prompt('AWS Secret Access Key', hide_input=True)
-        os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
-        credentials_content = dedent('''\
-            [default]
-            aws_access_key_id     = {key_id}
-            aws_secret_access_key = {secret}
-            ''').format(key_id=key_id, secret=secret)
-        with open(credentials_path, 'w') as fd:
-            fd.write(credentials_content)
+    ensure_aws_credentials()
 
     # load config file
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
@@ -188,8 +194,54 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
         return param_value
 
     region = ask('AWS region ID', 'region', suggestion='eu-west-1')
+
+    action('Connecting to region {region}..', **vars())
+    vpc_conn = boto.vpc.connect_to_region(region)
+    if not vpc_conn:
+        error('FAILED')
+        return
+    ok()
+
+    if not vpc and not data.get('vpc'):
+        action('Trying to autodetect VPC..')
+        vpcs = [v for v in vpc_conn.get_all_vpcs() if not v.is_default]
+        if len(vpcs) == 1:
+            data['vpc'] = vpcs[0].id
+        ok()
+
     vpc = ask('AWS VPC ID', 'vpc', suggestion='vpc-abcd1234', callback=validate_vpc_id)
+
+    action('Checking VPC {vpc}..', **vars())
+    subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
+    if not subnets:
+        error('FAILED')
+        return
+    ok()
+
+    if not domain and not data.get('domain'):
+        action('Trying to autodetect DNS domain..')
+        dns_conn = boto.route53.connect_to_region(region)
+        zones = dns_conn.get_zones()
+        if len(zones) == 1:
+            data['domain'] = zones[0].name.rstrip('.')
+        ok()
+
     domain = ask('DNS domain', 'domain', suggestion='apps.myorganization.org')
+
+    action('Checking domain {domain}..', **vars())
+    dns_conn = boto.route53.connect_to_region(region)
+    zone = dns_conn.get_zone(domain + '.')
+    if not zone:
+        error('FAILED')
+        return
+    ok()
+
+    if not ssl_certificate_arn and not data.get('ssl_certificate_arn'):
+        action('Trying to autodetect SSL certificate..')
+        temp_context = Context({'region': region, 'domain': domain})
+        data['ssl_certificate_arn'] = temp_context.find_ssl_certificate_arn()
+        ok()
+
     ask('SSL certificate ARN', 'ssl_certificate_arn', suggestion='arn:aws:iam::123:server-certificate/mycert')
 
     # handle Loggly configuration if needed
@@ -201,28 +253,6 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
         ask('Loggly Password', 'loggly_password', hide_input=True, show_default=False)
         ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
             hide_input=True)
-
-    action('Connecting to region {region}..', **vars())
-    vpc_conn = boto.vpc.connect_to_region(region)
-    if not vpc_conn:
-        error('FAILED')
-        return
-    ok()
-
-    action('Checking VPC {vpc}..', **vars())
-    subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
-    if not subnets:
-        error('FAILED')
-        return
-    ok()
-
-    action('Checking domain {domain}..', **vars())
-    dns_conn = boto.route53.connect_to_region(region)
-    zone = dns_conn.get_zone(domain + '.')
-    if not zone:
-        error('FAILED')
-        return
-    ok()
 
     with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
         fd.write(yaml.dump(data, default_flow_style=False))

@@ -1,5 +1,6 @@
 from distutils.version import LooseVersion
 import boto.ec2
+import boto.iam
 from boto.ec2.elb import LoadBalancer
 import functools
 import yaml
@@ -158,3 +159,14 @@ class Context:
             if 'Name' in inst.tags and inst.tags['Name'].startswith(IDENTIFIER_PREFIX) and inst.vpc_id == self.vpc:
                 res.append(ApplicationInstance(inst))
         return res
+
+    def find_ssl_certificate_arn(self) -> str:
+        iam_conn = boto.iam.connect_to_region(self.region)
+        expected_cert_name = self.domain.replace('.', '-')
+        response = iam_conn.list_server_certs()
+        response = response['list_server_certificates_response']
+        certs = response['list_server_certificates_result']['server_certificate_metadata_list']
+        for cert in certs:
+            if cert['server_certificate_name'] == expected_cert_name:
+                return cert['arn']
+        return None
