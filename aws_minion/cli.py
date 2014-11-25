@@ -753,6 +753,19 @@ def is_tag_valid(extracted):
 
 
 def is_docker_image_valid(docker_image: str):
+    """
+    >>> is_docker_image_valid('nginx')
+    False
+
+    >>> is_docker_image_valid('nginx:latest')
+    True
+
+    >>> is_docker_image_valid('foo/bar:1.0')
+    True
+
+    >>> is_docker_image_valid('foo.bar.example.com:2195/namespace/my_repo:1.0')
+    True
+    """
     parts = docker_image.split('/')
     number_of_parts = len(parts)
     extracted = extract_repository_and_tag(parts[number_of_parts - 1])
@@ -815,8 +828,6 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
 
-    conn = boto.ec2.connect_to_region(region)
-
     app = ctx.obj.get_application(application_name)
 
     sg, manifest = app.security_group, app.manifest
@@ -873,12 +884,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     autoscale.create_launch_configuration(lc)
     ok()
 
-    all_security_groups = conn.get_all_security_groups()
     lb_sg_name = 'app-{}-lb'.format(application_name)
-    lb_sg = None
-    for _sg in all_security_groups:
-        if _sg.name == lb_sg_name:
-            lb_sg = _sg
+    lb_sg = ctx.obj.get_security_group(lb_sg_name)
 
     if not lb_sg:
         raise Exception('LB security group not found')
@@ -913,16 +920,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                           connection=autoscale)
     autoscale.create_auto_scaling_group(ag)
 
+    def create_tag(key, value):
+        return boto.ec2.autoscale.tag.Tag(connection=autoscale, key=key, value=value, resource_id=group_name,
+                                          propagate_at_launch=True)
+
     tags = [
-        boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Name', value=group_name,
-                                   resource_id=group_name,
-                                   propagate_at_launch=True),
-        boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Team', value=manifest['team_name'],
-                                   resource_id=group_name,
-                                   propagate_at_launch=True),
-        boto.ec2.autoscale.tag.Tag(connection=autoscale, key='DockerImage', value=docker_image,
-                                   resource_id=group_name,
-                                   propagate_at_launch=True)
+        create_tag('Name', group_name),
+        create_tag('Team', manifest['team_name']),
+        create_tag('DockerImage', docker_image)
     ]
     autoscale.create_or_update_tags(tags)
 
@@ -933,10 +938,15 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     action('Waiting for instance start and LB..')
     lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
+    j = 0
     while not lb.instances:
+        if j > 100:
+            error('Max wait time for LB instances exceeded.')
+            break
         time.sleep(3)
         click.secho(' .', nl=False)
         lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
+        j += 0
     ok()
 
     action('Waiting for LB members to become active..')
@@ -1009,40 +1019,34 @@ def create(ctx, manifest_file):
         key.save(key_dir)
     ok()
 
-    all_security_groups = conn.get_all_security_groups()
-    exists = False
-    for _sg in all_security_groups:
-        if _sg.name == sg_name and _sg.vpc_id == vpc:
-            exists = True
-    if not exists:
-        action('Creating application security group {sg_name}..', **vars())
-        sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
-        # HACK: add manifest as tag
-        sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+    action('Creating application security group {sg_name}..', **vars())
+    sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
+    # HACK: add manifest as tag
+    sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-        rules = [
-            SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-            SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
-        ]
+    rules = [
+        SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
+        SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
+    ]
 
-        for rule in rules:
-            modify_sg(conn, sg, rule, authorize=True)
-        ok()
+    for rule in rules:
+        modify_sg(conn, sg, rule, authorize=True)
+    ok()
 
-        lb_sg_name = sg_name + '-lb'
-        action('Creating LB security group {lb_sg_name}..', **vars())
-        sg = conn.create_security_group(lb_sg_name, 'LB security group', vpc_id=vpc)
-        # HACK: add manifest as tag
-        sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+    lb_sg_name = sg_name + '-lb'
+    action('Creating LB security group {lb_sg_name}..', **vars())
+    sg = conn.create_security_group(lb_sg_name, 'LB security group', vpc_id=vpc)
+    # HACK: add manifest as tag
+    sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-        rules = [
-            SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
-            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
-        ]
+    rules = [
+        SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
+        SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
+    ]
 
-        for rule in rules:
-            modify_sg(conn, sg, rule, authorize=True)
-        ok()
+    for rule in rules:
+        modify_sg(conn, sg, rule, authorize=True)
+    ok()
 
     action('Creating IAM role and instance profile..')
     iam_conn = boto.iam.connect_to_region(region)
@@ -1088,11 +1092,9 @@ def delete(ctx, application_name: str):
     ok()
 
     action('Deleting LB security group..')
-    all_security_groups = conn.get_all_security_groups()
     lb_sg_name = 'app-{}-lb'.format(application_name)
-    for _sg in all_security_groups:
-        if _sg.name == lb_sg_name:
-            _sg.delete()
+    lb_sg = ctx.obj.get_security_group(lb_sg_name)
+    lb_sg.delete()
     ok()
 
 

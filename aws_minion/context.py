@@ -18,19 +18,10 @@ class ApplicationNotFound(Exception):
 
 class Application:
 
-    def __init__(self, name: str, conn):
+    def __init__(self, name: str, security_group):
         self.name = name
-        self.security_group = None
-
-        all_security_groups = conn.get_all_security_groups()
-        sg_name = self.identifier
-        for _sg in all_security_groups:
-            if _sg.name == sg_name:
-                self.security_group = _sg
-                self.manifest = yaml.safe_load(_sg.tags['Manifest'])
-
-        if not self.security_group:
-            raise ApplicationNotFound(name)
+        self.security_group = security_group
+        self.manifest = yaml.safe_load(security_group.tags['Manifest'])
 
     @property
     def identifier(self) -> str:
@@ -107,9 +98,10 @@ class Context:
         return self.config['domain']
 
     def get_application(self, application_name: str) -> Application:
-
-        conn = boto.ec2.connect_to_region(self.region)
-        app = Application(application_name, conn)
+        security_group = self.get_security_group(IDENTIFIER_PREFIX + application_name)
+        if not security_group:
+            raise ApplicationNotFound(application_name)
+        app = Application(application_name, security_group)
         return app
 
     def get_versions(self, application_name: str=None, application_version: str=None) -> [ApplicationVersion]:
@@ -170,3 +162,10 @@ class Context:
             if cert['server_certificate_name'] == expected_cert_name:
                 return cert['arn']
         return None
+
+    def get_security_group(self, sg_name: str):
+        conn = boto.ec2.connect_to_region(self.region)
+        all_security_groups = conn.get_all_security_groups()
+        for _sg in all_security_groups:
+            if _sg.name == sg_name:
+                return _sg

@@ -1,8 +1,9 @@
+import json
 import pytest
 from unittest.mock import MagicMock
 from click.testing import CliRunner
 from aws_minion.cli import cli
-from aws_minion.context import Context, ApplicationVersion
+from aws_minion.context import Context, ApplicationVersion, Application
 
 
 def test_list_versions(monkeypatch):
@@ -29,3 +30,40 @@ def test_list_versions(monkeypatch):
     lines = result.output.splitlines()
     cols = lines[1].split()
     assert cols == ['myapp', '1.0', 'foo/bar:123', '(no', 'instances)', '3', '60.0']
+
+
+def test_create_version(monkeypatch):
+    monkeypatch.setattr('boto.vpc.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.ec2.elb.connect_to_region', MagicMock())
+    monkeypatch.setattr('time.sleep', lambda s: s)
+
+    security_group = MagicMock()
+    security_group.tags = {'Manifest': json.dumps({'exposed_ports': [8080], 'team_name': 'MyTeam'})}
+
+    security_groups = {'app-myapp': security_group, 'app-myapp-lb': MagicMock()}
+
+    auto_scaling_group = MagicMock()
+    auto_scaling_group.tags = [MagicMock(key='DockerImage', value='foo/bar:123')]
+    auto_scaling_group.desired_capacity = 3
+
+    app = Application('myapp', security_group)
+
+    version = ApplicationVersion('myregion', 'myapp', '1.0', auto_scaling_group)
+    version.weight = 120
+
+    context = Context({'region': 'caprica', 'vpc': 'myvpc'})
+    context.get_versions = lambda: [version]
+    context.get_application = lambda x: app
+    context.get_security_group = lambda x: security_groups.get(x)
+    context_constructor = lambda x: context
+
+    monkeypatch.setattr('aws_minion.cli.Context', context_constructor)
+
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ['versions', 'create', 'myapp', '1.0', 'mydocker:2.3'], catch_exceptions=False)
+
+    assert 'ABORTED. Default health check time to wait for members to become active has been exceeded.' in result.output
