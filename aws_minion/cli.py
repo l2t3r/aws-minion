@@ -379,45 +379,10 @@ def instances(ctx):
         print_table('application_name application_version instance_id team ip_address state launch_time'.split(), rows)
 
 
-@versions.command()
-@click.argument('application-name', callback=validate_application_name)
-@click.argument('application-version', callback=validate_application_version)
-@click.argument('percentage', type=FloatRange(0, 100, clamp=True))
-@click.pass_context
-def traffic(ctx, application_name: str, application_version: str, percentage: float):
-    """
-    Set the percentage of the traffic for a single application version
-    """
-    region = ctx.obj.region
-    domain = ctx.obj.domain
-    percentage = int(percentage * PERCENT_RESOLUTION)
-
-    version_list = ctx.obj.get_versions(application_name)
-    if not versions:
-        raise click.BadParameter('Could not find any versions for application')
-
-    identifier_versions = collections.OrderedDict(
-        (av.dns_identifier, LooseVersion(av.version)) for av in version_list)
-
-    try:
-        version = next(v for v in version_list if v.version == application_version)
-    except StopIteration:
-        raise click.BadParameter('Could not find provided version')
-
-    identifier = version.dns_identifier
-
-    dns_conn = boto.route53.connect_to_region(region)
-    zone = dns_conn.get_zone(domain + '.')
-    dns_name = '{}.{}.'.format(application_name, domain)
-
-    lb = version.get_load_balancer()
-
-    rr = zone.get_records()
-
+def get_weights(dns_name, identifier, rr):
     partial_count = 0
     partial_sum = 0
     known_record_weights = {}
-    compensations = {}
     for r in rr:
         if r.type == 'CNAME' and r.name == dns_name:
             if r.weight:
@@ -428,18 +393,12 @@ def traffic(ctx, application_name: str, application_version: str, percentage: fl
             if r.identifier != identifier:
                 partial_sum += w
                 partial_count += 1
-
     if identifier not in known_record_weights:
         known_record_weights[identifier] = 0
+    return known_record_weights, partial_count, partial_sum
 
-    if partial_count:
-        delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
-    else:
-        delta = 0
-        compensations[identifier] = FULL_PERCENTAGE - percentage
-        warning("Setting full percentage for the only available version")
-        percentage = int(FULL_PERCENTAGE)
 
+def calculate_new_weights(delta, identifier, known_record_weights, percentage):
     new_record_weights = {}
     total_weight = 0
     for i, w in known_record_weights.items():
@@ -459,57 +418,46 @@ def traffic(ctx, application_name: str, application_version: str, percentage: fl
                     n = 0
         new_record_weights[i] = n
         total_weight += n
+    return new_record_weights, total_weight
 
-    calculation_error = FULL_PERCENTAGE - total_weight
 
+def compensate(calculation_error, compensations, identifier, new_record_weights, partial_count,
+               percentage, identifier_versions):
     forced_delta = None
-    if calculation_error:
-        # distribute the error on the versions, other then the current one
-        part = calculation_error / partial_count
-        if part > 0:
-            part = int(max(1, part))
-        else:
-            part = int(min(-1, part))
-        # avoid changing the older version distributions
-        for i in sorted(new_record_weights.keys(), key=lambda x: identifier_versions[x], reverse=True):
-            if i == identifier:
-                continue
-            nw = new_record_weights[i] + part
-            if nw <= 0:
-                # do not remove the traffic from the minimal traffic versions
-                continue
-            new_record_weights[i] = nw
-            calculation_error -= part
-            compensations[i] = part
-            if calculation_error == 0:
-                break
+    # distribute the error on the versions, other then the current one
+    part = calculation_error / partial_count
+    if part > 0:
+        part = int(max(1, part))
+    else:
+        part = int(min(-1, part))
+    # avoid changing the older version distributions
+    for i in sorted(new_record_weights.keys(), key=lambda x: identifier_versions[x], reverse=True):
+        if i == identifier:
+            continue
+        nw = new_record_weights[i] + part
+        if nw <= 0:
+            # do not remove the traffic from the minimal traffic versions
+            continue
+        new_record_weights[i] = nw
+        calculation_error -= part
+        compensations[i] = part
+        if calculation_error == 0:
+            break
+    if calculation_error != 0:
+        adjusted_percentage = percentage + calculation_error
+        forced_delta = calculation_error
+        calculation_error = 0
+        warning(
+            ("Changing given percentage from {} to {} " +
+             "because all other versions are already getting the possible minimum traffic").format(
+                percentage / PERCENT_RESOLUTION, adjusted_percentage / PERCENT_RESOLUTION))
+        percentage = adjusted_percentage
+        new_record_weights[identifier] = percentage
+    assert calculation_error == 0
+    return forced_delta, percentage
 
-        if calculation_error != 0:
-            adjusted_percentage = percentage + calculation_error
-            forced_delta = calculation_error
-            calculation_error = 0
-            warning(
-                ("Changing given percentage from {} to {} " +
-                 "because all other versions are already getting the possible minimum traffic").format(
-                    percentage / PERCENT_RESOLUTION, adjusted_percentage / PERCENT_RESOLUTION))
-            percentage = adjusted_percentage
-            new_record_weights[identifier] = percentage
-        assert calculation_error == 0
 
-    print_table('application_name version identifier old_weight delta compensation new_weight'.split(),
-                sorted([
-                       {'application_name': application_name,
-                        'version': str(identifier_versions[i]),
-                        'identifier': i,
-                        'old_weight': known_record_weights[i],
-                        'delta': delta if i != identifier else forced_delta,
-                        'compensation': compensations.get(i, None),
-                        'new_weight': new_record_weights[i],
-                        } for i in known_record_weights.keys()
-                       ], key=lambda x: identifier_versions[x['identifier']]))
-
-    assert sum(new_record_weights.values()) == FULL_PERCENTAGE
-
+def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr):
     action('Setting weights..')
     did_the_upsert = False
     for r in rr:
@@ -523,16 +471,78 @@ def traffic(ctx, application_name: str, application_version: str, percentage: fl
                     did_the_upsert = True
             else:
                 rr.add_change_record('DELETE', r)
-
     if percentage > 0 and not did_the_upsert:
         change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=identifier, weight=percentage)
         change.add_value(lb.dns_name)
-
     if rr.changes:
         rr.commit()
         ok()
     else:
         ok(' not changed')
+
+
+def change_version_traffic(application_name: str, application_version: str, ctx: Context, percentage: float):
+    region = ctx.region
+    domain = ctx.domain
+
+    percentage = int(percentage * PERCENT_RESOLUTION)
+    version_list = ctx.get_versions(application_name)
+    if not versions:
+        raise click.BadParameter('Could not find any versions for application')
+    identifier_versions = collections.OrderedDict(
+        (av.dns_identifier, LooseVersion(av.version)) for av in version_list)
+    try:
+        version = next(v for v in version_list if v.version == application_version)
+    except StopIteration:
+        raise click.BadParameter('Could not find provided version')
+    identifier = version.dns_identifier
+    dns_conn = boto.route53.connect_to_region(region)
+    zone = dns_conn.get_zone(domain + '.')
+    dns_name = '{}.{}.'.format(application_name, domain)
+    lb = version.get_load_balancer()
+    rr = zone.get_records()
+    known_record_weights, partial_count, partial_sum = get_weights(dns_name, identifier, rr)
+    compensations = {}
+    if partial_count:
+        delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
+    else:
+        delta = 0
+        compensations[identifier] = FULL_PERCENTAGE - percentage
+        warning("Setting full percentage for the only available version")
+        percentage = int(FULL_PERCENTAGE)
+    new_record_weights, total_weight = calculate_new_weights(delta, identifier, known_record_weights, percentage)
+    calculation_error = FULL_PERCENTAGE - total_weight
+    forced_delta = None
+    if calculation_error:
+        forced_delta, percentage = compensate(calculation_error, compensations, identifier,
+                                              new_record_weights, partial_count, percentage, identifier_versions)
+    rows = [
+        {
+            'application_name': application_name,
+            'version': str(identifier_versions[i]),
+            'identifier': i,
+            'old_weight': known_record_weights[i],
+            'delta': delta if i != identifier else forced_delta,
+            'compensation': compensations.get(i, None),
+            'new_weight': new_record_weights[i],
+        } for i in known_record_weights.keys()
+    ]
+    print_table('application_name version identifier old_weight delta compensation new_weight'.split(),
+                sorted(rows, key=lambda x: identifier_versions[x['identifier']]))
+    assert sum(new_record_weights.values()) == FULL_PERCENTAGE
+    set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr)
+
+
+@versions.command()
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
+@click.argument('percentage', type=FloatRange(0, 100, clamp=True))
+@click.pass_context
+def traffic(ctx, application_name: str, application_version: str, percentage: float):
+    """
+    Set the percentage of the traffic for a single application version
+    """
+    change_version_traffic(application_name, application_version, ctx.obj, percentage)
 
 
 @versions.command()
@@ -572,8 +582,8 @@ def delete_version(ctx, application_name: str, application_version: str):
 
     running_instance_ids = set([i.instance_id for i in version.auto_scaling_group.instances])
 
-    # TODO: invoke traffic command here to disable traffic
-    # command.main(['ver', 'traffic', application_name, application_version, 0.0], standalone_mode=False)
+    # Disable traffic to this version
+    change_version_traffic(application_name, application_version, ctx.obj, 0.0)
 
     action('Shutting down {instance_count} instances..', instance_count=len(running_instance_ids))
     version.auto_scaling_group.shutdown_instances()
@@ -903,16 +913,17 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                           connection=autoscale)
     autoscale.create_auto_scaling_group(ag)
 
-    tags = [boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Name', value=group_name,
-                                       resource_id=group_name,
-                                       propagate_at_launch=True),
-            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Team', value=manifest['team_name'],
-                                       resource_id=group_name,
-                                       propagate_at_launch=True),
-            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='DockerImage', value=docker_image,
-                                       resource_id=group_name,
-                                       propagate_at_launch=True)
-            ]
+    tags = [
+        boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Name', value=group_name,
+                                   resource_id=group_name,
+                                   propagate_at_launch=True),
+        boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Team', value=manifest['team_name'],
+                                   resource_id=group_name,
+                                   propagate_at_launch=True),
+        boto.ec2.autoscale.tag.Tag(connection=autoscale, key='DockerImage', value=docker_image,
+                                   resource_id=group_name,
+                                   propagate_at_launch=True)
+    ]
     autoscale.create_or_update_tags(tags)
 
     ag.set_capacity(1)
