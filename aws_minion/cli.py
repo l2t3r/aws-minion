@@ -126,34 +126,21 @@ def cli(ctx):
 
 
 @cli.command()
-@click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
-@click.option('--vpc', help='AWS VPC ID', prompt='AWS VPC ID (e.g. "vpc-abcd1234")', callback=validate_vpc_id)
-@click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
-@click.option('--ssl-certificate-arn', help='SSL certificate ARN (e.g. arn:aws:iam::123:server-certificate/mycert)')
+@click.option('--region', help='AWS region ID')
+@click.option('--vpc', help='AWS VPC ID')
+@click.option('--domain', help='DNS domain')
+@click.option('--ssl-certificate-arn', help='SSL certificate ARN')
 @click.pass_context
 def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     """
-    Configure the AWS connection settings
+    Configure the AWS and Loggly connection settings
     """
-    param_data = {'region': region, 'vpc': vpc, 'domain': domain, 'ssl_certificate_arn': ssl_certificate_arn}
-    os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
-    if os.path.exists(CONFIG_FILE_PATH):
-        with open(CONFIG_FILE_PATH, 'rb') as fd:
-            data = yaml.safe_load(fd)
-    else:
-        data = {}
-    for k, v in param_data.items():
-        if v:
-            data[k] = v
-
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
         click.secho('AWS credentials file not found, please provide them now')
         key_id = click.prompt('AWS Access Key ID')
         secret = click.prompt('AWS Secret Access Key', hide_input=True)
-
         os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
-
         credentials_content = dedent('''\
             [default]
             aws_access_key_id     = {key_id}
@@ -162,32 +149,54 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
         with open(credentials_path, 'w') as fd:
             fd.write(credentials_content)
 
-    # handle Loggly configuration if needed
-    while True:
-        configure_loggly = click.prompt('Do you want to configure Loggly? [y/n]', 'y')
-        configure_loggly = configure_loggly.lower()
-        if configure_loggly == 'y' or configure_loggly == 'n':
-            break
+    # load config file
+    os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
+    if os.path.exists(CONFIG_FILE_PATH):
+        with open(CONFIG_FILE_PATH, 'rb') as fd:
+            data = yaml.safe_load(fd)
+    else:
+        data = {}
+
+    param_data = {'region': region, 'vpc': vpc, 'domain': domain, 'ssl_certificate_arn': ssl_certificate_arn}
+
+    def ask(msg: str, name: str, suggestion: str=None, callback=None, abort=True, hide_input=False, show_default=True):
+        if param_data.get(name):
+            # if parameter provided, override existing value in the config file
+            param_value = param_data[name]
+            click.echo('{}: {}'.format(msg, param_value))
         else:
-            print('input has to be [y/n]')
+            param_value = data.get(name)
+            if not param_value and suggestion:
+                rewritten_msg = '{} (e.g. "{}")'.format(msg, suggestion)
+            elif hide_input and param_value and not show_default:
+                rewritten_msg = '{} [*********]'.format(msg)
+            else:
+                rewritten_msg = msg
+            param_value = click.prompt(rewritten_msg, default=param_value, hide_input=hide_input,
+                                       show_default=show_default)
+            if abort and not param_value:
+                raise click.Abort('{} should be provided'.format(msg))
 
-    configure_loggly = configure_loggly == 'y'
+        data[name] = param_value
 
-    loggly_account = None
-    loggly_user = None
-    loggly_password = None
-    loggly_auth_token = None
+        if callback:
+            callback(ctx, None, param_value)
+        return param_value
+
+    region = ask('AWS region ID', 'region', suggestion='eu-west-1')
+    vpc = ask('AWS VPC ID', 'vpc', suggestion='vpc-abcd1234', callback=validate_vpc_id)
+    domain = ask('DNS domain', 'domain', suggestion='apps.myorganization.org')
+    ask('SSL certificate ARN', 'ssl_certificate_arn', suggestion='arn:aws:iam::123:server-certificate/mycert')
+
+    # handle Loggly configuration if needed
+    configure_loggly = click.confirm('Do you want to configure Loggly?', default=True)
 
     if configure_loggly:
-        loggly_account = click.prompt('Loggly Account/Subdomain (e.g. "mycompany")')
-        loggly_user = click.prompt('Loggly User (e.g. "jdoe")')
-        loggly_password = click.prompt('Loggly Password', hide_input=True)
-        loggly_auth_token = click.prompt('Loggly Auth Token', hide_input=True)
-
-    data['loggly_account'] = loggly_account
-    data['loggly_user'] = loggly_user
-    data['loggly_password'] = loggly_password
-    data['loggly_auth_token'] = loggly_auth_token
+        ask('Loggly Account/Subdomain', 'loggly_account', suggestion='myorganization')
+        ask('Loggly User', 'loggly_user', suggestion='jdoe')
+        ask('Loggly Password', 'loggly_password', hide_input=True, show_default=False)
+        ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
+            hide_input=True)
 
     action('Connecting to region {region}..', **vars())
     vpc_conn = boto.vpc.connect_to_region(region)
@@ -212,7 +221,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     ok()
 
     with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
-        fd.write(yaml.dump(data))
+        fd.write(yaml.dump(data, default_flow_style=False))
     ctx.obj = Context(data)
 
 
