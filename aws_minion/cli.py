@@ -47,6 +47,12 @@ SecurityGroupRule = collections.namedtuple("SecurityGroupRule",
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
+# Default instance health check configuration in AWS
+HEALTH_CHECK_TIMEOUT_IN_S = 5
+HEALTH_CHECK_INTERVAL_IN_S = 20
+UNHEALTHY_THRESHOLD = 5
+SLEEP_TIME_IN_S = 5
+
 
 def validate_application_name(ctx, param, value):
     match = APPLICATION_NAME_PATTERN.match(value)
@@ -693,6 +699,65 @@ def prepare_log_shipper_script(application_name, application_version, data):
                     loggly_auth_token=data['loggly_auth_token'])
 
 
+def extract_repository_and_tag(repo_name: str):
+    splits = repo_name.split(':')
+    if len(splits) == 2:
+        return (splits[0], splits[1])
+    else:
+        return (repo_name, '')
+
+
+def is_tag_valid(extracted):
+    re_tag = re.compile('[a-zA-Z0-9-_.]+')
+
+    if len(extracted) > 1:
+        return re_tag.match(extracted[1]) is not None
+    else:
+        return False
+
+
+def is_docker_image_valid(docker_image: str):
+    parts = docker_image.split('/')
+    number_of_parts = len(parts)
+    extracted = extract_repository_and_tag(parts[number_of_parts - 1])
+
+    is_valid_tag = is_tag_valid(extracted)
+    if not is_valid_tag:
+        return False
+
+    re_namespace = re.compile('[a-z0-9_]+')
+    re_repo_name = re.compile('[a-zA-Z0-9-_.]+')
+
+    extracted_repo_part = extracted[0]
+
+    if number_of_parts == 1:
+        # only repository name was specified
+        return re_repo_name.match(extracted_repo_part) is not None
+    elif number_of_parts == 2:
+        # namspace and repository were specifed (e.g. namespace/my_repo:1.0)
+        is_namespace_valid = re_namespace.match(parts[0]) is not None
+        is_repo_valid = re_repo_name.match(extracted_repo_part) is not None
+        return is_repo_valid and is_namespace_valid
+    elif number_of_parts == 3:
+        # private registry, namspace and repository were specified
+        # (e.g. testdc01-pequod-core01.tunnel.zalando:2195/namespace/my_repo:1.0)
+        re_registry = re.compile("^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*" +
+                                 "([A-Za-z]|[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9])(\:[0-9]+)?$")
+        re_registry_ip = re.compile("^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}" +
+                                    "([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\:[0-9]+)?$")
+
+        is_registry_valid = re_registry.match(parts[0]) is not None
+        if not is_registry_valid:
+            is_registry_valid = re_registry_ip.match(parts[0]) is not None
+
+        is_namespace_valid = re_namespace.match(parts[1]) is not None
+        is_repo_valid = re_repo_name.match(extracted_repo_part) is not None
+
+        return is_registry_valid and is_namespace_valid and is_repo_valid
+    else:
+        return False
+
+
 @versions.command('create')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
@@ -703,6 +768,10 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     """
     Create a new application version
     """
+
+    if not is_docker_image_valid(docker_image):
+        error('specified docker image {} is not valid'.format(docker_image))
+        return
 
     region = ctx.obj.region
     vpc = ctx.obj.vpc
@@ -834,10 +903,25 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     ok()
 
     action('Waiting for LB members to become active..')
+
+    # calculate max number of iterations corresponding to the max time range after which AWS declares
+    # a member as 'OutOfService'
+    max_wait_time = UNHEALTHY_THRESHOLD * (HEALTH_CHECK_TIMEOUT_IN_S + HEALTH_CHECK_INTERVAL_IN_S)
+    max_iterations = (max_wait_time / SLEEP_TIME_IN_S) + 1
+
+    j = 0
     while not [i.state for i in lb.get_instance_health() if i.state == 'InService']:
-        time.sleep(3)
+        if j == max_iterations:
+            break
+        time.sleep(SLEEP_TIME_IN_S)
         click.secho(' .', nl=False)
-    ok()
+        j += 1
+
+    if j == max_iterations:
+        error('ABORTED. Default health check time to wait for members to become active has been exceeded.' +
+              ' There might be a problem with your application')
+    else:
+        ok()
 
 
 @applications.command()
