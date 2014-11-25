@@ -730,6 +730,68 @@ def is_docker_image_valid(docker_image: str):
         return False
 
 
+def get_instance_by_group_and_status(conn, group_name: str, status: str):
+    """
+    Determines EC2 instance with tag:Name == group_name and specified status
+    """
+    instances = conn.get_only_instances(filters={ 'tag:Name': group_name })
+    if len(instances) == 0:
+        error('could not find any instance with tag:Name : {}'.format(group_name))
+        return None
+    
+    for instance in instances:
+        if instance.state == 'running':
+           return instance
+    
+    return None
+
+
+def get_key_file_path_by_app_name(app_name: str):
+    """
+    Constructs the path to the application's (or rather to the instances running the application)
+    SSH key file which was created in `configure`
+    """
+    key_name = 'app-{}'.format(app_name)
+    key_dir = os.path.expanduser('~/.ssh')
+    return os.path.join(key_dir, '%s.pem' % key_name)
+
+
+def print_cloud_init_log(conn, application_name: str, group_name: str):
+    """
+    Prints out /var/log/cloud-init-output.log of a running instance.
+    Note: this function is intended to be called by `create_version(..)`
+          where only one running instance is created initially
+    
+    parameters:
+    
+    conn:             boto region connection
+    application_name: name of the application e.g. 'logmeister'
+    group_name:       name of the application combined with version e.g. 'app-logmeister-0.4'
+                      Note: group_name has to correspond to instance's tag:Name
+    """
+
+    instance = get_instance_by_group_and_status(conn, group_name, 'running') 
+    if instance is None:
+       error('could not find any active instance')
+       return
+
+    key_file = get_key_file_path_by_app_name(application_name)
+    if not os.path.exists(key_file):
+       error('could not find ssh key file {}'.format(key_file))
+       return
+
+    ssh_client = sshclient_from_instance(instance,
+                                         ssh_key_file=key_file,
+                                         user_name='ubuntu')
+
+    status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
+    if status == 0:
+       print('see cloud-init log for analysis')
+       print(codecs.decode(stdout, "unicode_escape"))
+    else:
+       error('could fetch cloud-init log')
+
+
 @versions.command('create')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
@@ -752,13 +814,10 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
 
     conn = boto.ec2.connect_to_region(region)
-
     app = ctx.obj.get_application(application_name)
-
     sg, manifest = app.security_group, app.manifest
 
     env_vars = {}
-
     for key_value in env:
         key, value = key_value.split('=', 1)
         env_vars[key] = value
@@ -894,30 +953,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
               ' There might be a problem with your application')
         
         print('trying to retrieve information for analysis...')
-
-        instances = conn.get_only_instances(filters={ 'tag:Name': group_name })
-        if len(instances) == 0:
-           error('could not find any instance with tag:Name : {}'.format(group_name))
-
-        instance = instances[0]
-        key_name = 'app-{}'.format(application_name)
-        key_dir = os.path.expanduser('~/.ssh')
-        key_file = os.path.join(key_dir, '%s.pem' % key_name)
-
-        if not os.path.exists(key_file):
-           error('could not find ssh key file {}'.format(key_file))
-           return
-
-        ssh_client = sshclient_from_instance(instance,
-                                            ssh_key_file=key_file,
-                                            user_name='ubuntu')
-
-        status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
-        if status == 0:
-           print('see cloud-init log for analysis')
-           print(codecs.decode(stdout, "unicode_escape"))
-        else:
-           error('could fetch cloud-init log')
+        print_cloud_init_log(conn, application_name, group_name)
     else:
         ok()
 
