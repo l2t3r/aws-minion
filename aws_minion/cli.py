@@ -55,6 +55,10 @@ SLEEP_TIME_IN_S = 5
 
 
 def validate_application_name(ctx, param, value):
+    """
+    >>> validate_application_name(None, None, 'foo-bar')
+    'foo-bar'
+    """
     match = APPLICATION_NAME_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid application name (allowed: {})'.format(APPLICATION_NAME_PATTERN.pattern))
@@ -62,6 +66,10 @@ def validate_application_name(ctx, param, value):
 
 
 def validate_application_version(ctx, param, value):
+    """
+    >>> validate_application_version(None, None, '1.0')
+    '1.0'
+    """
     match = APPLICATION_VERSION_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid app version (allowed: {})'.format(APPLICATION_VERSION_PATTERN.pattern))
@@ -69,6 +77,10 @@ def validate_application_version(ctx, param, value):
 
 
 def validate_vpc_id(ctx, param, value):
+    """
+    >>> validate_vpc_id(None, None, 'vpc-abc123')
+    'vpc-abc123'
+    """
     match = VPC_ID_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid VPC ID (allowed: {})'.format(VPC_ID_PATTERN.pattern))
@@ -337,6 +349,10 @@ def versions(ctx):
 
 
 def parse_instance_name(name: str) -> tuple:
+    """
+    >>> parse_instance_name('app-my-app-0.1')
+    ('my-app', '0.1')
+    """
     application_name, application_version = name[len(PREFIX):].rsplit('-', 1)
     return application_name, application_version
 
@@ -700,6 +716,10 @@ def prepare_log_shipper_script(application_name, application_version, data):
 
 
 def extract_repository_and_tag(repo_name: str):
+    """
+    >>> extract_repository_and_tag('foo/bar:1.0')
+    ('foo/bar', '1.0')
+    """
     splits = repo_name.split(':')
     if len(splits) == 2:
         return (splits[0], splits[1])
@@ -708,6 +728,12 @@ def extract_repository_and_tag(repo_name: str):
 
 
 def is_tag_valid(extracted):
+    """
+    >>> is_tag_valid(('', ))
+    False
+    >>> is_tag_valid(('foo/bar', '1.0'))
+    True
+    """
     re_tag = re.compile('[a-zA-Z0-9-_.]+')
 
     if len(extracted) > 1:
@@ -740,7 +766,7 @@ def is_docker_image_valid(docker_image: str):
         return is_repo_valid and is_namespace_valid
     elif number_of_parts == 3:
         # private registry, namspace and repository were specified
-        # (e.g. testdc01-pequod-core01.tunnel.zalando:2195/namespace/my_repo:1.0)
+        # (e.g. foo.bar.example.com:2195/namespace/my_repo:1.0)
         re_registry = re.compile("^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*" +
                                  "([A-Za-z]|[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9])(\:[0-9]+)?$")
         re_registry_ip = re.compile("^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}" +
