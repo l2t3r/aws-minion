@@ -993,11 +993,12 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     try:
         autoscale.create_auto_scaling_group(ag)
     except Exception as e:
-        error('A problem occurred while trying to create auto scaling group for {}: {}'.format(application_name, str(e)))
+        error('A problem occurred while trying to create auto scaling group for {}: {}'
+              .format(application_name, str(e)))
         action('Deleting launch configuration after failed auto scaling group creation...')
         autoscale.delete_launch_configuration(lc.name)
         ok()
-        return    
+        return
 
     def create_tag(key, value):
         return boto.ec2.autoscale.tag.Tag(connection=autoscale, key=key, value=value, resource_id=group_name,
