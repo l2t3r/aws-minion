@@ -719,9 +719,6 @@ def prepare_log_shipper_script(application_name, application_version, data):
         service rsyslog restart
         ''').format(application_name=application_name,
                     application_version=application_version,
-                    loggly_user=data['loggly_user'],
-                    loggly_password=data['loggly_password'],
-                    loggly_account=data['loggly_account'],
                     loggly_auth_token=data['loggly_auth_token'])
 
 

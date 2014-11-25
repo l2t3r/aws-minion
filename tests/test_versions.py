@@ -53,7 +53,7 @@ def test_create_version(monkeypatch):
     version = ApplicationVersion('myregion', 'myapp', '1.0', auto_scaling_group)
     version.weight = 120
 
-    context = Context({'region': 'caprica', 'vpc': 'myvpc'})
+    context = Context({'region': 'caprica', 'vpc': 'myvpc', 'loggly_auth_token': 'abc'})
     context.get_versions = lambda: [version]
     context.get_application = lambda x: app
     context.get_security_group = lambda x: security_groups.get(x)
@@ -64,6 +64,6 @@ def test_create_version(monkeypatch):
     runner = CliRunner()
 
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ['versions', 'create', 'myapp', '1.0', 'mydocker:2.3'], catch_exceptions=False)
+        result = runner.invoke(cli, ['versions', 'create', 'myapp', '1.0', 'mydocker:2.3', '-e', 'MY_ENV_VAR=123'], catch_exceptions=False)
 
     assert 'ABORTED. Default health check time to wait for members to become active has been exceeded.' in result.output
