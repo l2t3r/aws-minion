@@ -132,9 +132,10 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
+@click.option('--config-file', '-c', help='Use alternative configuration file', default=CONFIG_FILE_PATH)
 @click.pass_context
-def cli(ctx):
-    path = os.path.expanduser(CONFIG_FILE_PATH)
+def cli(ctx, config_file):
+    path = os.path.expanduser(config_file)
     data = {}
     if os.path.exists(path):
         with open(path, 'rb') as fd:
@@ -168,8 +169,13 @@ def ensure_aws_credentials():
 @click.option('--vpc', help='AWS VPC ID')
 @click.option('--domain', help='DNS domain')
 @click.option('--ssl-certificate-arn', help='SSL certificate ARN')
+@click.option('--loggly-account', help='Loggly account/subdomain')
+@click.option('--loggly-user', help='Loggly username')
+@click.option('--loggly-password', help='Loggly password')
+@click.option('--loggly-auth-token', help='Loggly auth token')
 @click.pass_context
-def configure(ctx, region, vpc, domain, ssl_certificate_arn):
+def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, loggly_user, loggly_password,
+              loggly_auth_token):
     """
     Configure the AWS and Loggly connection settings
     """
@@ -183,7 +189,14 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     else:
         data = {}
 
-    param_data = {'region': region, 'vpc': vpc, 'domain': domain, 'ssl_certificate_arn': ssl_certificate_arn}
+    param_data = {'region': region,
+                  'vpc': vpc,
+                  'domain': domain,
+                  'ssl_certificate_arn': ssl_certificate_arn,
+                  'loggly_account': loggly_account,
+                  'loggly_user': loggly_user,
+                  'loggly_password': loggly_password,
+                  'loggly_auth_token': loggly_auth_token}
 
     def ask(msg: str, name: str, suggestion: str=None, callback=None, abort=True, hide_input=False, show_default=True):
         if param_data.get(name):
@@ -265,7 +278,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     ask('SSL certificate ARN', 'ssl_certificate_arn', suggestion='arn:aws:iam::123:server-certificate/mycert')
 
     # handle Loggly configuration if needed
-    configure_loggly = click.confirm('Do you want to configure Loggly?', default=True)
+    configure_loggly = loggly_auth_token or click.confirm('Do you want to configure Loggly?', default=True)
 
     if configure_loggly:
         ask('Loggly Account/Subdomain', 'loggly_account', suggestion='myorganization')
@@ -402,7 +415,6 @@ def get_weights(dns_name, identifier, rr):
 
 def calculate_new_weights(delta, identifier, known_record_weights, percentage):
     new_record_weights = {}
-    total_weight = 0
     for i, w in known_record_weights.items():
         if i == identifier:
             n = percentage
@@ -419,8 +431,7 @@ def calculate_new_weights(delta, identifier, known_record_weights, percentage):
                     # this should not happen, but just in case
                     n = 0
         new_record_weights[i] = n
-        total_weight += n
-    return new_record_weights, total_weight
+    return new_record_weights
 
 
 def compensate(calculation_error, compensations, identifier, new_record_weights, partial_count,
@@ -512,7 +523,8 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
         compensations[identifier] = FULL_PERCENTAGE - percentage
         warning("Setting full percentage for the only available version")
         percentage = int(FULL_PERCENTAGE)
-    new_record_weights, total_weight = calculate_new_weights(delta, identifier, known_record_weights, percentage)
+    new_record_weights = calculate_new_weights(delta, identifier, known_record_weights, percentage)
+    total_weight = sum(new_record_weights.values())
     calculation_error = FULL_PERCENTAGE - total_weight
     forced_delta = None
     if calculation_error:
