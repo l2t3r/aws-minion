@@ -7,8 +7,7 @@ import os
 import random
 import time
 import datetime
-import re
-
+import re 
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
@@ -21,6 +20,8 @@ import boto.manage.cmdshell
 from boto.ec2.elb import HealthCheck
 import click
 import yaml
+from boto.manage.cmdshell import sshclient_from_instance
+import codecs
 
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
@@ -126,6 +127,7 @@ def cli(ctx):
     if os.path.exists(path):
         with open(path, 'rb') as fd:
             data = yaml.safe_load(fd)
+
     if not data and not 'configure'.startswith(ctx.invoked_subcommand):
         raise click.UsageError('Please run "minion configure" first.')
     ctx.obj = Context(data)
@@ -890,6 +892,32 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     if j == max_iterations:
         error('ABORTED. Default health check time to wait for members to become active has been exceeded.' +
               ' There might be a problem with your application')
+        
+        print('trying to retrieve information for analysis...')
+
+        instances = conn.get_only_instances(filters={ 'tag:Name': group_name })
+        if len(instances) == 0:
+           error('could not find any instance with tag:Name : {}'.format(group_name))
+
+        instance = instances[0]
+        key_name = 'app-{}'.format(application_name)
+        key_dir = os.path.expanduser('~/.ssh')
+        key_file = os.path.join(key_dir, '%s.pem' % key_name)
+
+        if not os.path.exists(key_file):
+           error('could not find ssh key file {}'.format(key_file))
+           return
+
+        ssh_client = sshclient_from_instance(instance,
+                                            ssh_key_file=key_file,
+                                            user_name='ubuntu')
+
+        status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
+        if status == 0:
+           print('see cloud-init log for analysis')
+           print(codecs.decode(stdout, "unicode_escape"))
+        else:
+           error('could fetch cloud-init log')
     else:
         ok()
 
