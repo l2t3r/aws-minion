@@ -162,18 +162,22 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     def ask(msg: str, name: str, suggestion: str=None, callback=None, abort=True, hide_input=False, show_default=True):
         if param_data.get(name):
             # if parameter provided, override existing value in the config file
-            param_value = param_data[name]
+            param_value = param_data[name].strip()
             click.echo('{}: {}'.format(msg, param_value))
         else:
             param_value = data.get(name)
+            if param_value is not None:
+                param_value = param_value.strip()
             if not param_value and suggestion:
                 rewritten_msg = '{} (e.g. "{}")'.format(msg, suggestion)
             elif hide_input and param_value and not show_default:
                 rewritten_msg = '{} [*********]'.format(msg)
             else:
                 rewritten_msg = msg
-            param_value = click.prompt(rewritten_msg, default=param_value, hide_input=hide_input,
-                                       show_default=show_default)
+            param_value = click.prompt(rewritten_msg,
+                                       default=param_value,
+                                       hide_input=hide_input,
+                                       show_default=show_default).strip()
             if abort and not param_value:
                 raise click.Abort('{} should be provided'.format(msg))
 
