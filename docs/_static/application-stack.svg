@@ -15,6 +15,8 @@
    version="1.1"
    inkscape:version="0.48.4 r9939"
    sodipodi:docname="application-stack.svg">
+  <title
+     id="title4841">Application Stack</title>
   <defs
      id="defs4">
     <marker
@@ -88,7 +90,25 @@
         <dc:format>image/svg+xml</dc:format>
         <dc:type
            rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
-        <dc:title></dc:title>
+        <dc:title>Application Stack</dc:title>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Henning Jacobs</dc:title>
+          </cc:Agent>
+        </dc:creator>
+        <dc:rights>
+          <cc:Agent>
+            <dc:title>Zalando SE</dc:title>
+          </cc:Agent>
+        </dc:rights>
+        <dc:subject>
+          <rdf:Bag>
+            <rdf:li>elb</rdf:li>
+            <rdf:li>ec2</rdf:li>
+            <rdf:li>docker</rdf:li>
+          </rdf:Bag>
+        </dc:subject>
+        <dc:description></dc:description>
       </cc:Work>
     </rdf:RDF>
   </metadata>
