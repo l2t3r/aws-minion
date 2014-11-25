@@ -874,7 +874,7 @@ def print_cloud_init_log(conn, application_name: str, group_name: str):
 
     status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
     if status == 0:
-        print('see cloud-init log for analysis')
+        print('see cloud-init log for analysis:')
         print(codecs.decode(stdout, "unicode_escape"))
     else:
         error('could fetch cloud-init log')
@@ -990,7 +990,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
                           connection=autoscale)
-    autoscale.create_auto_scaling_group(ag)
+    try:
+        autoscale.create_auto_scaling_group(ag)
+    except Exception as e:
+        error('A problem occurred while trying to create auto scaling group for {}: {}'.format(application_name, str(e)))
+        action('Deleting launch configuration after failed auto scaling group creation...')
+        autoscale.delete_launch_configuration(lc.name)
+        ok()
+        return    
 
     def create_tag(key, value):
         return boto.ec2.autoscale.tag.Tag(connection=autoscale, key=key, value=value, resource_id=group_name,
