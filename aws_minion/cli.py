@@ -25,7 +25,7 @@ import yaml
 
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 from aws_minion.console import print_table, action, ok, error, warning
-from aws_minion.context import Context
+from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.utils import FloatRange
 
 AMI_ID = 'ami-f0b11187'
@@ -118,24 +118,6 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
                      src_group=src_group)
 
 
-class ApplicationNotFound(Exception):
-    def __init__(self, application_name):
-        self.application_name = application_name
-
-    def __str__(self):
-        return 'Application "{}" does not exist'.format(self.application_name)
-
-
-def get_app_security_group_manifest(conn, application_name: str):
-    all_security_groups = conn.get_all_security_groups()
-    sg_name = 'app-{}'.format(application_name)
-    for _sg in all_security_groups:
-        if _sg.name == sg_name:
-            manifest = yaml.safe_load(_sg.tags['Manifest'])
-            return _sg, manifest
-    raise ApplicationNotFound(application_name)
-
-
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.pass_context
 def cli(ctx):
@@ -150,34 +132,21 @@ def cli(ctx):
 
 
 @cli.command()
-@click.option('--region', help='AWS region ID', prompt='AWS region ID (e.g. "eu-west-1")')
-@click.option('--vpc', help='AWS VPC ID', prompt='AWS VPC ID (e.g. "vpc-abcd1234")', callback=validate_vpc_id)
-@click.option('--domain', help='DNS domain (e.g. apps.example.org)', prompt='DNS domain (e.g. apps.example.org)')
-@click.option('--ssl-certificate-arn', help='SSL certificate ARN (e.g. arn:aws:iam::123:server-certificate/mycert)')
+@click.option('--region', help='AWS region ID')
+@click.option('--vpc', help='AWS VPC ID')
+@click.option('--domain', help='DNS domain')
+@click.option('--ssl-certificate-arn', help='SSL certificate ARN')
 @click.pass_context
 def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     """
-    Configure the AWS connection settings
+    Configure the AWS and Loggly connection settings
     """
-    param_data = {'region': region, 'vpc': vpc, 'domain': domain, 'ssl_certificate_arn': ssl_certificate_arn}
-    os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
-    if os.path.exists(CONFIG_FILE_PATH):
-        with open(CONFIG_FILE_PATH, 'rb') as fd:
-            data = yaml.safe_load(fd)
-    else:
-        data = {}
-    for k, v in param_data.items():
-        if v:
-            data[k] = v
-
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
         click.secho('AWS credentials file not found, please provide them now')
         key_id = click.prompt('AWS Access Key ID')
         secret = click.prompt('AWS Secret Access Key', hide_input=True)
-
         os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
-
         credentials_content = dedent('''\
             [default]
             aws_access_key_id     = {key_id}
@@ -186,32 +155,58 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
         with open(credentials_path, 'w') as fd:
             fd.write(credentials_content)
 
-    # handle Loggly configuration if needed
-    while True:
-        configure_loggly = click.prompt('Do you want to configure Loggly? [y/n]', 'y')
-        configure_loggly = configure_loggly.lower()
-        if configure_loggly == 'y' or configure_loggly == 'n':
-            break
+    # load config file
+    os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
+    if os.path.exists(CONFIG_FILE_PATH):
+        with open(CONFIG_FILE_PATH, 'rb') as fd:
+            data = yaml.safe_load(fd)
+    else:
+        data = {}
+
+    param_data = {'region': region, 'vpc': vpc, 'domain': domain, 'ssl_certificate_arn': ssl_certificate_arn}
+
+    def ask(msg: str, name: str, suggestion: str=None, callback=None, abort=True, hide_input=False, show_default=True):
+        if param_data.get(name):
+            # if parameter provided, override existing value in the config file
+            param_value = param_data[name].strip()
+            click.echo('{}: {}'.format(msg, param_value))
         else:
-            print('input has to be [y/n]')
+            param_value = data.get(name)
+            if param_value is not None:
+                param_value = param_value.strip()
+            if not param_value and suggestion:
+                rewritten_msg = '{} (e.g. "{}")'.format(msg, suggestion)
+            elif hide_input and param_value and not show_default:
+                rewritten_msg = '{} [*********]'.format(msg)
+            else:
+                rewritten_msg = msg
+            param_value = click.prompt(rewritten_msg,
+                                       default=param_value,
+                                       hide_input=hide_input,
+                                       show_default=show_default).strip()
+            if abort and not param_value:
+                raise click.Abort('{} should be provided'.format(msg))
 
-    configure_loggly = configure_loggly == 'y'
+        data[name] = param_value
 
-    loggly_account = None
-    loggly_user = None
-    loggly_password = None
-    loggly_auth_token = None
+        if callback:
+            callback(ctx, None, param_value)
+        return param_value
+
+    region = ask('AWS region ID', 'region', suggestion='eu-west-1')
+    vpc = ask('AWS VPC ID', 'vpc', suggestion='vpc-abcd1234', callback=validate_vpc_id)
+    domain = ask('DNS domain', 'domain', suggestion='apps.myorganization.org')
+    ask('SSL certificate ARN', 'ssl_certificate_arn', suggestion='arn:aws:iam::123:server-certificate/mycert')
+
+    # handle Loggly configuration if needed
+    configure_loggly = click.confirm('Do you want to configure Loggly?', default=True)
 
     if configure_loggly:
-        loggly_account = click.prompt('Loggly Account/Subdomain (e.g. "mycompany")')
-        loggly_user = click.prompt('Loggly User (e.g. "jdoe")')
-        loggly_password = click.prompt('Loggly Password', hide_input=True)
-        loggly_auth_token = click.prompt('Loggly Auth Token', hide_input=True)
-
-    data['loggly_account'] = loggly_account
-    data['loggly_user'] = loggly_user
-    data['loggly_password'] = loggly_password
-    data['loggly_auth_token'] = loggly_auth_token
+        ask('Loggly Account/Subdomain', 'loggly_account', suggestion='myorganization')
+        ask('Loggly User', 'loggly_user', suggestion='jdoe')
+        ask('Loggly Password', 'loggly_password', hide_input=True, show_default=False)
+        ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
+            hide_input=True)
 
     action('Connecting to region {region}..', **vars())
     vpc_conn = boto.vpc.connect_to_region(region)
@@ -236,7 +231,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     ok()
 
     with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
-        fd.write(yaml.dump(data))
+        fd.write(yaml.dump(data, default_flow_style=False))
     ctx.obj = Context(data)
 
 
@@ -609,6 +604,14 @@ def prepare_log_shipper_script(application_name, application_version, data):
            exit 1
         fi
 
+        mkdir -pv /etc/rsyslog.d/keys/ca.d
+        cd /etc/rsyslog.d/keys/ca.d/
+        wget https://logdog.loggly.com/media/loggly.com.crt
+        wget https://certs.starfieldtech.com/repository/sf_bundle.crt
+        cat {{sf_bundle.crt,loggly.com.crt}} > loggly_full.crt
+        rm {{sf_bundle.crt,loggly.com.crt}}
+        cd
+
         currentDockerFile=/var/lib/docker/containers/$containerId/$containerId-json.log
 
         ln $currentDockerFile $LOG_FILE
@@ -617,27 +620,45 @@ def prepare_log_shipper_script(application_name, application_version, data):
         f=/etc/rsyslog.d/22-loggly.conf
 
         # Define the template used for sending logs to Loggly. Do not change this format.
-        echo '$template LogglyFormat,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% \
-%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"system\\"] %msg%\\n"' > $f
-        echo '*.* @@logs-01.loggly.com:514;LogglyFormat' >> $f
+        (
+            echo '$template LogglyFormat,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% \
+%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"system\\" tag=\\"TLS\\"] %msg%\\n"'
+            echo '#RsyslogGnuTLS'
+            echo '$DefaultNetstreamDriverCAFile /etc/rsyslog.d/keys/ca.d/loggly_full.crt'
+            echo '$ActionSendStreamDriver gtls'
+            echo '$ActionSendStreamDriverMode 1'
+            echo '$ActionSendStreamDriverAuthMode x509/name'
+            echo '$ActionSendStreamDriverPermittedPeer *.loggly.com'
+            echo '*.* @@logs-01.loggly.com:6514;LogglyFormat'
+        ) > $f
 
         f=/etc/rsyslog.d/21-filemonitoring-{application_name}-{application_version}.conf
-        echo '$ModLoad imfile' > $f
-        echo '$InputFilePollInterval 10' >> $f
-        echo '$WorkDirectory /var/spool/rsyslog' >> $f
-        echo '$PrivDropToGroup adm' >> $f
-        echo '$InputFileName /var/log/docker.log' >> $f
-        echo '$InputFileTag {application_name}-{application_version}:' >> $f
-        echo '$InputFileStateFile stat-{application_name}-{application_version}' >> $f
-        echo '$InputFileSeverity info' >> $f
-        echo '$InputFilePersistStateInterval 20000' >> $f
-        echo '$InputRunFileMonitor' >> $f
-        echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
+        (
+            echo '$ModLoad imfile'
+            echo '$InputFilePollInterval 10'
+            echo '$WorkDirectory /var/spool/rsyslog'
+            echo '$PrivDropToGroup adm'
+            echo '$InputFileName /var/log/docker.log'
+            echo '$InputFileTag {application_name}-{application_version}:'
+            echo '$InputFileStateFile stat-{application_name}-{application_version}'
+            echo '$InputFileSeverity info'
+            echo '$InputFilePersistStateInterval 20000'
+            echo '$InputRunFileMonitor'
+            echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
 %timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% \
-[{loggly_auth_token}@41058 tag=\\"file\\"] %msg%\\n"' >> $f
-        echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then \
-@@logs-01.loggly.com:514;LogglyFormatFile{application_name}-{application_version}' >> $f
-        echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then stop' >> $f
+[{loggly_auth_token}@41058 tag=\\"file\\" tag=\\"TLS\\"] %msg%\\n"'
+            echo '#RsyslogGnuTLS'
+            echo '$DefaultNetstreamDriverCAFile /etc/rsyslog.d/keys/ca.d/loggly_full.crt'
+            echo '$ActionSendStreamDriver gtls'
+            echo '$ActionSendStreamDriverMode 1'
+            echo '$ActionSendStreamDriverAuthMode x509/name'
+            echo '$ActionSendStreamDriverPermittedPeer *.loggly.com'
+            echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then \
+@@logs-01.loggly.com:6514;LogglyFormatFile{application_name}-{application_version}'
+            echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then stop'
+        ) > $f
+
+
 
         service rsyslog restart
         ''').format(application_name=application_name,
@@ -744,7 +765,13 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     log_shipper_script = prepare_log_shipper_script(application_name, application_version, ctx.obj.config)
 
+    dns_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
+
     init_script = '''#!/bin/bash
+    iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+    iid=${{iid/i-}}
+    hostname {hostname}-$iid
+
     # add Docker repo
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
     echo 'deb https://get.docker.io/ubuntu docker main' > /etc/apt/sources.list.d/docker.list
@@ -752,13 +779,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     apt-get update
 
     # Docker
-    apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker
+    apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker rsyslog-gnutls
 
     containerId=$(docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image})
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
     '''.format(docker_image=docker_image,
+               hostname=dns_name,
                exposed_port=manifest['exposed_ports'][0],
                env_options=generate_env_options(env_vars),
                log_shipper_script=shlex.quote(log_shipper_script))
@@ -803,8 +831,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     else:
         ports = [(80, manifest['exposed_ports'][0], 'http')]
     elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
-    lb = elb_conn.create_load_balancer(lb_name, zones=None, listeners=ports,
+    lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
                                        subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
     lb.configure_health_check(hc)
     ok()
@@ -813,7 +840,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
-                          load_balancers=[lb_name],
+                          load_balancers=[dns_name],
                           availability_zones=[subnet.availability_zone for subnet in subnets],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
@@ -892,7 +919,7 @@ def create(ctx, manifest_file):
 
     action('Checking whether application {application_name} exists..', **vars())
     try:
-        sg, manifest = get_app_security_group_manifest(conn, application_name)
+        ctx.obj.get_application(application_name)
         error('ALREADY EXISTS, ABORTING')
         return
     except ApplicationNotFound:
@@ -968,7 +995,9 @@ def delete(ctx, application_name: str):
     region = ctx.obj.region
 
     conn = boto.ec2.connect_to_region(region)
-    sg, manifest = get_app_security_group_manifest(conn, application_name)
+    app = ctx.obj.get_application(application_name)
+
+    sg = app.security_group
 
     action('Deleting security group..')
     while True:
