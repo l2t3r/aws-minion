@@ -13,6 +13,10 @@ AWS Minion
 AWS Minion manages immutable Docker application stacks on Amazon EC2 instances with ELB and Route 53.
 See the `AWS Minion Documentation on Read the Docs`_.
 
+.. image:: http://aws-minion.readthedocs.org/en/latest/_images/application-stack.svg
+   :target: http://aws-minion.readthedocs.org/en/latest/concepts.html
+   :alt: Application Stack
+
 Installing
 ==========
 

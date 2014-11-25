@@ -4,6 +4,8 @@ Basic Concepts
 
 The AWS Minion allows managing application stacks of Dockerized applications.
 
+.. image:: _static/application-stack.svg
+
 Application
 ===========
 
