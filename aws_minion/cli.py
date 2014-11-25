@@ -131,9 +131,10 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
+@click.option('--config-file', '-c', help='Use alternative configuration file', default=CONFIG_FILE_PATH)
 @click.pass_context
-def cli(ctx):
-    path = os.path.expanduser(CONFIG_FILE_PATH)
+def cli(ctx, config_file):
+    path = os.path.expanduser(config_file)
     data = {}
     if os.path.exists(path):
         with open(path, 'rb') as fd:
