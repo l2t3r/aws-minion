@@ -17,7 +17,7 @@ def test_list_versions(monkeypatch):
     version = ApplicationVersion('myregion', 'myapp', '1.0', auto_scaling_group)
     version.weight = 120
 
-    context = Context({})
+    context = Context({'region': 'caprica'})
     context.get_versions = lambda: [version]
     context_constructor = lambda x: context
 
@@ -26,7 +26,9 @@ def test_list_versions(monkeypatch):
     runner = CliRunner()
 
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ['versions'], catch_exceptions=False)
+        with open('config.yaml', 'w') as fd:
+            yaml.dump(context.config, fd)
+        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions'], catch_exceptions=False)
 
     lines = result.output.splitlines()
     cols = lines[1].split()
