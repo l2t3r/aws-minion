@@ -56,6 +56,10 @@ SLEEP_TIME_IN_S = 5
 
 
 def validate_application_name(ctx, param, value):
+    """
+    >>> validate_application_name(None, None, 'foo-bar')
+    'foo-bar'
+    """
     match = APPLICATION_NAME_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid application name (allowed: {})'.format(APPLICATION_NAME_PATTERN.pattern))
@@ -63,6 +67,10 @@ def validate_application_name(ctx, param, value):
 
 
 def validate_application_version(ctx, param, value):
+    """
+    >>> validate_application_version(None, None, '1.0')
+    '1.0'
+    """
     match = APPLICATION_VERSION_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid app version (allowed: {})'.format(APPLICATION_VERSION_PATTERN.pattern))
@@ -70,6 +78,10 @@ def validate_application_version(ctx, param, value):
 
 
 def validate_vpc_id(ctx, param, value):
+    """
+    >>> validate_vpc_id(None, None, 'vpc-abc123')
+    'vpc-abc123'
+    """
     match = VPC_ID_PATTERN.match(value)
     if not match:
         raise click.BadParameter('invalid VPC ID (allowed: {})'.format(VPC_ID_PATTERN.pattern))
@@ -133,6 +145,24 @@ def cli(ctx):
     ctx.obj = Context(data)
 
 
+def ensure_aws_credentials():
+    credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
+    if not os.path.exists(credentials_path):
+        click.secho('AWS credentials file not found, please provide them now')
+        key_id = click.prompt('AWS Access Key ID')
+        secret = click.prompt('AWS Secret Access Key', hide_input=True)
+
+        os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
+
+        credentials_content = dedent('''\
+            [default]
+            aws_access_key_id     = {key_id}
+            aws_secret_access_key = {secret}
+            ''').format(key_id=key_id, secret=secret)
+        with open(credentials_path, 'w') as fd:
+            fd.write(credentials_content)
+
+
 @cli.command()
 @click.option('--region', help='AWS region ID')
 @click.option('--vpc', help='AWS VPC ID')
@@ -143,19 +173,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
     """
     Configure the AWS and Loggly connection settings
     """
-    credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
-    if not os.path.exists(credentials_path):
-        click.secho('AWS credentials file not found, please provide them now')
-        key_id = click.prompt('AWS Access Key ID')
-        secret = click.prompt('AWS Secret Access Key', hide_input=True)
-        os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
-        credentials_content = dedent('''\
-            [default]
-            aws_access_key_id     = {key_id}
-            aws_secret_access_key = {secret}
-            ''').format(key_id=key_id, secret=secret)
-        with open(credentials_path, 'w') as fd:
-            fd.write(credentials_content)
+    ensure_aws_credentials()
 
     # load config file
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
@@ -196,8 +214,54 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
         return param_value
 
     region = ask('AWS region ID', 'region', suggestion='eu-west-1')
+
+    action('Connecting to region {region}..', **vars())
+    vpc_conn = boto.vpc.connect_to_region(region)
+    if not vpc_conn:
+        error('FAILED')
+        return
+    ok()
+
+    if not vpc and not data.get('vpc'):
+        action('Trying to autodetect VPC..')
+        vpcs = [v for v in vpc_conn.get_all_vpcs() if not v.is_default]
+        if len(vpcs) == 1:
+            data['vpc'] = vpcs[0].id
+        ok()
+
     vpc = ask('AWS VPC ID', 'vpc', suggestion='vpc-abcd1234', callback=validate_vpc_id)
+
+    action('Checking VPC {vpc}..', **vars())
+    subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
+    if not subnets:
+        error('FAILED')
+        return
+    ok()
+
+    if not domain and not data.get('domain'):
+        action('Trying to autodetect DNS domain..')
+        dns_conn = boto.route53.connect_to_region(region)
+        zones = dns_conn.get_zones()
+        if len(zones) == 1:
+            data['domain'] = zones[0].name.rstrip('.')
+        ok()
+
     domain = ask('DNS domain', 'domain', suggestion='apps.myorganization.org')
+
+    action('Checking domain {domain}..', **vars())
+    dns_conn = boto.route53.connect_to_region(region)
+    zone = dns_conn.get_zone(domain + '.')
+    if not zone:
+        error('FAILED')
+        return
+    ok()
+
+    if not ssl_certificate_arn and not data.get('ssl_certificate_arn'):
+        action('Trying to autodetect SSL certificate..')
+        temp_context = Context({'region': region, 'domain': domain})
+        data['ssl_certificate_arn'] = temp_context.find_ssl_certificate_arn()
+        ok()
+
     ask('SSL certificate ARN', 'ssl_certificate_arn', suggestion='arn:aws:iam::123:server-certificate/mycert')
 
     # handle Loggly configuration if needed
@@ -209,28 +273,6 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn):
         ask('Loggly Password', 'loggly_password', hide_input=True, show_default=False)
         ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
             hide_input=True)
-
-    action('Connecting to region {region}..', **vars())
-    vpc_conn = boto.vpc.connect_to_region(region)
-    if not vpc_conn:
-        error('FAILED')
-        return
-    ok()
-
-    action('Checking VPC {vpc}..', **vars())
-    subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
-    if not subnets:
-        error('FAILED')
-        return
-    ok()
-
-    action('Checking domain {domain}..', **vars())
-    dns_conn = boto.route53.connect_to_region(region)
-    zone = dns_conn.get_zone(domain + '.')
-    if not zone:
-        error('FAILED')
-        return
-    ok()
 
     with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
         fd.write(yaml.dump(data, default_flow_style=False))
@@ -309,6 +351,10 @@ def versions(ctx):
 
 
 def parse_instance_name(name: str) -> tuple:
+    """
+    >>> parse_instance_name('app-my-app-0.1')
+    ('my-app', '0.1')
+    """
     application_name, application_version = name[len(PREFIX):].rsplit('-', 1)
     return application_name, application_version
 
@@ -335,45 +381,10 @@ def instances(ctx):
         print_table('application_name application_version instance_id team ip_address state launch_time'.split(), rows)
 
 
-@versions.command()
-@click.argument('application-name', callback=validate_application_name)
-@click.argument('application-version', callback=validate_application_version)
-@click.argument('percentage', type=FloatRange(0, 100, clamp=True))
-@click.pass_context
-def traffic(ctx, application_name: str, application_version: str, percentage: float):
-    """
-    Set the percentage of the traffic for a single application version
-    """
-    region = ctx.obj.region
-    domain = ctx.obj.domain
-    percentage = int(percentage * PERCENT_RESOLUTION)
-
-    version_list = ctx.obj.get_versions(application_name)
-    if not versions:
-        raise click.BadParameter('Could not find any versions for application')
-
-    identifier_versions = collections.OrderedDict(
-        (av.dns_identifier, LooseVersion(av.version)) for av in version_list)
-
-    try:
-        version = next(v for v in version_list if v.version == application_version)
-    except StopIteration:
-        raise click.BadParameter('Could not find provided version')
-
-    identifier = version.dns_identifier
-
-    dns_conn = boto.route53.connect_to_region(region)
-    zone = dns_conn.get_zone(domain + '.')
-    dns_name = '{}.{}.'.format(application_name, domain)
-
-    lb = version.get_load_balancer()
-
-    rr = zone.get_records()
-
+def get_weights(dns_name, identifier, rr):
     partial_count = 0
     partial_sum = 0
     known_record_weights = {}
-    compensations = {}
     for r in rr:
         if r.type == 'CNAME' and r.name == dns_name:
             if r.weight:
@@ -384,18 +395,12 @@ def traffic(ctx, application_name: str, application_version: str, percentage: fl
             if r.identifier != identifier:
                 partial_sum += w
                 partial_count += 1
-
     if identifier not in known_record_weights:
         known_record_weights[identifier] = 0
+    return known_record_weights, partial_count, partial_sum
 
-    if partial_count:
-        delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
-    else:
-        delta = 0
-        compensations[identifier] = FULL_PERCENTAGE - percentage
-        warning("Setting full percentage for the only available version")
-        percentage = int(FULL_PERCENTAGE)
 
+def calculate_new_weights(delta, identifier, known_record_weights, percentage):
     new_record_weights = {}
     total_weight = 0
     for i, w in known_record_weights.items():
@@ -415,57 +420,46 @@ def traffic(ctx, application_name: str, application_version: str, percentage: fl
                     n = 0
         new_record_weights[i] = n
         total_weight += n
+    return new_record_weights, total_weight
 
-    calculation_error = FULL_PERCENTAGE - total_weight
 
+def compensate(calculation_error, compensations, identifier, new_record_weights, partial_count,
+               percentage, identifier_versions):
     forced_delta = None
-    if calculation_error:
-        # distribute the error on the versions, other then the current one
-        part = calculation_error / partial_count
-        if part > 0:
-            part = int(max(1, part))
-        else:
-            part = int(min(-1, part))
-        # avoid changing the older version distributions
-        for i in sorted(new_record_weights.keys(), key=lambda x: identifier_versions[x], reverse=True):
-            if i == identifier:
-                continue
-            nw = new_record_weights[i] + part
-            if nw <= 0:
-                # do not remove the traffic from the minimal traffic versions
-                continue
-            new_record_weights[i] = nw
-            calculation_error -= part
-            compensations[i] = part
-            if calculation_error == 0:
-                break
+    # distribute the error on the versions, other then the current one
+    part = calculation_error / partial_count
+    if part > 0:
+        part = int(max(1, part))
+    else:
+        part = int(min(-1, part))
+    # avoid changing the older version distributions
+    for i in sorted(new_record_weights.keys(), key=lambda x: identifier_versions[x], reverse=True):
+        if i == identifier:
+            continue
+        nw = new_record_weights[i] + part
+        if nw <= 0:
+            # do not remove the traffic from the minimal traffic versions
+            continue
+        new_record_weights[i] = nw
+        calculation_error -= part
+        compensations[i] = part
+        if calculation_error == 0:
+            break
+    if calculation_error != 0:
+        adjusted_percentage = percentage + calculation_error
+        forced_delta = calculation_error
+        calculation_error = 0
+        warning(
+            ("Changing given percentage from {} to {} " +
+             "because all other versions are already getting the possible minimum traffic").format(
+                percentage / PERCENT_RESOLUTION, adjusted_percentage / PERCENT_RESOLUTION))
+        percentage = adjusted_percentage
+        new_record_weights[identifier] = percentage
+    assert calculation_error == 0
+    return forced_delta, percentage
 
-        if calculation_error != 0:
-            adjusted_percentage = percentage + calculation_error
-            forced_delta = calculation_error
-            calculation_error = 0
-            warning(
-                ("Changing given percentage from {} to {} " +
-                 "because all other versions are already getting the possible minimum traffic").format(
-                    percentage / PERCENT_RESOLUTION, adjusted_percentage / PERCENT_RESOLUTION))
-            percentage = adjusted_percentage
-            new_record_weights[identifier] = percentage
-        assert calculation_error == 0
 
-    print_table('application_name version identifier old_weight delta compensation new_weight'.split(),
-                sorted([
-                       {'application_name': application_name,
-                        'version': str(identifier_versions[i]),
-                        'identifier': i,
-                        'old_weight': known_record_weights[i],
-                        'delta': delta if i != identifier else forced_delta,
-                        'compensation': compensations.get(i, None),
-                        'new_weight': new_record_weights[i],
-                        } for i in known_record_weights.keys()
-                       ], key=lambda x: identifier_versions[x['identifier']]))
-
-    assert sum(new_record_weights.values()) == FULL_PERCENTAGE
-
+def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr):
     action('Setting weights..')
     did_the_upsert = False
     for r in rr:
@@ -479,16 +473,78 @@ def traffic(ctx, application_name: str, application_version: str, percentage: fl
                     did_the_upsert = True
             else:
                 rr.add_change_record('DELETE', r)
-
     if percentage > 0 and not did_the_upsert:
         change = rr.add_change('CREATE', dns_name, 'CNAME', ttl=60, identifier=identifier, weight=percentage)
         change.add_value(lb.dns_name)
-
     if rr.changes:
         rr.commit()
         ok()
     else:
         ok(' not changed')
+
+
+def change_version_traffic(application_name: str, application_version: str, ctx: Context, percentage: float):
+    region = ctx.region
+    domain = ctx.domain
+
+    percentage = int(percentage * PERCENT_RESOLUTION)
+    version_list = ctx.get_versions(application_name)
+    if not versions:
+        raise click.BadParameter('Could not find any versions for application')
+    identifier_versions = collections.OrderedDict(
+        (av.dns_identifier, LooseVersion(av.version)) for av in version_list)
+    try:
+        version = next(v for v in version_list if v.version == application_version)
+    except StopIteration:
+        raise click.BadParameter('Could not find provided version')
+    identifier = version.dns_identifier
+    dns_conn = boto.route53.connect_to_region(region)
+    zone = dns_conn.get_zone(domain + '.')
+    dns_name = '{}.{}.'.format(application_name, domain)
+    lb = version.get_load_balancer()
+    rr = zone.get_records()
+    known_record_weights, partial_count, partial_sum = get_weights(dns_name, identifier, rr)
+    compensations = {}
+    if partial_count:
+        delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
+    else:
+        delta = 0
+        compensations[identifier] = FULL_PERCENTAGE - percentage
+        warning("Setting full percentage for the only available version")
+        percentage = int(FULL_PERCENTAGE)
+    new_record_weights, total_weight = calculate_new_weights(delta, identifier, known_record_weights, percentage)
+    calculation_error = FULL_PERCENTAGE - total_weight
+    forced_delta = None
+    if calculation_error:
+        forced_delta, percentage = compensate(calculation_error, compensations, identifier,
+                                              new_record_weights, partial_count, percentage, identifier_versions)
+    rows = [
+        {
+            'application_name': application_name,
+            'version': str(identifier_versions[i]),
+            'identifier': i,
+            'old_weight': known_record_weights[i],
+            'delta': delta if i != identifier else forced_delta,
+            'compensation': compensations.get(i, None),
+            'new_weight': new_record_weights[i],
+        } for i in known_record_weights.keys()
+    ]
+    print_table('application_name version identifier old_weight delta compensation new_weight'.split(),
+                sorted(rows, key=lambda x: identifier_versions[x['identifier']]))
+    assert sum(new_record_weights.values()) == FULL_PERCENTAGE
+    set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr)
+
+
+@versions.command()
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
+@click.argument('percentage', type=FloatRange(0, 100, clamp=True))
+@click.pass_context
+def traffic(ctx, application_name: str, application_version: str, percentage: float):
+    """
+    Set the percentage of the traffic for a single application version
+    """
+    change_version_traffic(application_name, application_version, ctx.obj, percentage)
 
 
 @versions.command()
@@ -528,8 +584,8 @@ def delete_version(ctx, application_name: str, application_version: str):
 
     running_instance_ids = set([i.instance_id for i in version.auto_scaling_group.instances])
 
-    # TODO: invoke traffic command here to disable traffic
-    # command.main(['ver', 'traffic', application_name, application_version, 0.0], standalone_mode=False)
+    # Disable traffic to this version
+    change_version_traffic(application_name, application_version, ctx.obj, 0.0)
 
     action('Shutting down {instance_count} instances..', instance_count=len(running_instance_ids))
     version.auto_scaling_group.shutdown_instances()
@@ -665,13 +721,14 @@ def prepare_log_shipper_script(application_name, application_version, data):
         service rsyslog restart
         ''').format(application_name=application_name,
                     application_version=application_version,
-                    loggly_user=data['loggly_user'],
-                    loggly_password=data['loggly_password'],
-                    loggly_account=data['loggly_account'],
                     loggly_auth_token=data['loggly_auth_token'])
 
 
 def extract_repository_and_tag(repo_name: str):
+    """
+    >>> extract_repository_and_tag('foo/bar:1.0')
+    ('foo/bar', '1.0')
+    """
     splits = repo_name.split(':')
     if len(splits) == 2:
         return (splits[0], splits[1])
@@ -680,6 +737,12 @@ def extract_repository_and_tag(repo_name: str):
 
 
 def is_tag_valid(extracted):
+    """
+    >>> is_tag_valid(('', ))
+    False
+    >>> is_tag_valid(('foo/bar', '1.0'))
+    True
+    """
     re_tag = re.compile('[a-zA-Z0-9-_.]+')
 
     if len(extracted) > 1:
@@ -689,6 +752,19 @@ def is_tag_valid(extracted):
 
 
 def is_docker_image_valid(docker_image: str):
+    """
+    >>> is_docker_image_valid('nginx')
+    False
+
+    >>> is_docker_image_valid('nginx:latest')
+    True
+
+    >>> is_docker_image_valid('foo/bar:1.0')
+    True
+
+    >>> is_docker_image_valid('foo.bar.example.com:2195/namespace/my_repo:1.0')
+    True
+    """
     parts = docker_image.split('/')
     number_of_parts = len(parts)
     extracted = extract_repository_and_tag(parts[number_of_parts - 1])
@@ -712,7 +788,7 @@ def is_docker_image_valid(docker_image: str):
         return is_repo_valid and is_namespace_valid
     elif number_of_parts == 3:
         # private registry, namspace and repository were specified
-        # (e.g. testdc01-pequod-core01.tunnel.zalando:2195/namespace/my_repo:1.0)
+        # (e.g. foo.bar.example.com:2195/namespace/my_repo:1.0)
         re_registry = re.compile("^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*" +
                                  "([A-Za-z]|[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9])(\:[0-9]+)?$")
         re_registry_ip = re.compile("^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}" +
@@ -868,12 +944,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     autoscale.create_launch_configuration(lc)
     ok()
 
-    all_security_groups = conn.get_all_security_groups()
     lb_sg_name = 'app-{}-lb'.format(application_name)
-    lb_sg = None
-    for _sg in all_security_groups:
-        if _sg.name == lb_sg_name:
-            lb_sg = _sg
+    lb_sg = ctx.obj.get_security_group(lb_sg_name)
 
     if not lb_sg:
         raise Exception('LB security group not found')
@@ -908,16 +980,15 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                           connection=autoscale)
     autoscale.create_auto_scaling_group(ag)
 
-    tags = [boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Name', value=group_name,
-                                       resource_id=group_name,
-                                       propagate_at_launch=True),
-            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='Team', value=manifest['team_name'],
-                                       resource_id=group_name,
-                                       propagate_at_launch=True),
-            boto.ec2.autoscale.tag.Tag(connection=autoscale, key='DockerImage', value=docker_image,
-                                       resource_id=group_name,
-                                       propagate_at_launch=True)
-            ]
+    def create_tag(key, value):
+        return boto.ec2.autoscale.tag.Tag(connection=autoscale, key=key, value=value, resource_id=group_name,
+                                          propagate_at_launch=True)
+
+    tags = [
+        create_tag('Name', group_name),
+        create_tag('Team', manifest['team_name']),
+        create_tag('DockerImage', docker_image)
+    ]
     autoscale.create_or_update_tags(tags)
 
     ag.set_capacity(1)
@@ -927,10 +998,15 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     action('Waiting for instance start and LB..')
     lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
+    j = 0
     while not lb.instances:
+        if j > 100:
+            error('Max wait time for LB instances exceeded.')
+            break
         time.sleep(3)
         click.secho(' .', nl=False)
         lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
+        j += 0
     ok()
 
     action('Waiting for LB members to become active..')
@@ -1006,40 +1082,34 @@ def create(ctx, manifest_file):
         key.save(key_dir)
     ok()
 
-    all_security_groups = conn.get_all_security_groups()
-    exists = False
-    for _sg in all_security_groups:
-        if _sg.name == sg_name and _sg.vpc_id == vpc:
-            exists = True
-    if not exists:
-        action('Creating application security group {sg_name}..', **vars())
-        sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
-        # HACK: add manifest as tag
-        sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+    action('Creating application security group {sg_name}..', **vars())
+    sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
+    # HACK: add manifest as tag
+    sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-        rules = [
-            SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-            SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
-        ]
+    rules = [
+        SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
+        SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
+    ]
 
-        for rule in rules:
-            modify_sg(conn, sg, rule, authorize=True)
-        ok()
+    for rule in rules:
+        modify_sg(conn, sg, rule, authorize=True)
+    ok()
 
-        lb_sg_name = sg_name + '-lb'
-        action('Creating LB security group {lb_sg_name}..', **vars())
-        sg = conn.create_security_group(lb_sg_name, 'LB security group', vpc_id=vpc)
-        # HACK: add manifest as tag
-        sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+    lb_sg_name = sg_name + '-lb'
+    action('Creating LB security group {lb_sg_name}..', **vars())
+    sg = conn.create_security_group(lb_sg_name, 'LB security group', vpc_id=vpc)
+    # HACK: add manifest as tag
+    sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-        rules = [
-            SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
-            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
-        ]
+    rules = [
+        SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
+        SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
+    ]
 
-        for rule in rules:
-            modify_sg(conn, sg, rule, authorize=True)
-        ok()
+    for rule in rules:
+        modify_sg(conn, sg, rule, authorize=True)
+    ok()
 
     action('Creating IAM role and instance profile..')
     iam_conn = boto.iam.connect_to_region(region)
@@ -1085,11 +1155,9 @@ def delete(ctx, application_name: str):
     ok()
 
     action('Deleting LB security group..')
-    all_security_groups = conn.get_all_security_groups()
     lb_sg_name = 'app-{}-lb'.format(application_name)
-    for _sg in all_security_groups:
-        if _sg.name == lb_sg_name:
-            _sg.delete()
+    lb_sg = ctx.obj.get_security_group(lb_sg_name)
+    lb_sg.delete()
     ok()
 
 

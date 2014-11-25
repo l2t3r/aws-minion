@@ -33,7 +33,7 @@ def error(msg, **kwargs):
 
 
 def warning(msg, **kwargs):
-    click.secho(' {}'.format(msg), fg='green', bold=True, **kwargs)
+    click.secho(' {}'.format(msg), fg='yellow', bold=True, **kwargs)
 
 
 def format_time(ts):
@@ -106,12 +106,3 @@ def print_table(cols, rows):
             click.secho(('{:' + align + str(colwidths[col]) + '}').format(val), nl=False, **style)
             click.echo(' ', nl=False)
         click.echo('')
-
-
-def print_permissions(permissions):
-    cols = 'path comment'.split()
-    rows = []
-    for row in permissions:
-        rows.append({'path': row['path'], 'comment': (row['comment'] or '') + row['path_comments']})
-
-    print_table(cols, rows)
