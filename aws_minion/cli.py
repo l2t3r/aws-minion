@@ -830,7 +830,7 @@ def get_instances_by_group_and_status(conn, group_name: str, status: str):
 
     for instance in instances:
         if instance.state == 'running':
-           running_instances_list.append(instance)
+            running_instances_list.append(instance)
 
     return running_instances_list
 
@@ -855,7 +855,7 @@ def print_remote_file(instance, application_name: str, remote_file_path: str):
     application_name: name of the application e.g. 'logmeister'
     remote_file_path: path of the target file on the EC2 instance
     """
-    
+
     key_file = get_key_file_path_by_app_name(application_name)
     if not os.path.exists(key_file):
         error('could not find ssh key file {}'.format(key_file))
@@ -873,7 +873,8 @@ def print_remote_file(instance, application_name: str, remote_file_path: str):
         print('see cloud-init log for analysis:')
         print(codecs.decode(stdout, "unicode_escape"))
     else:
-        error('could not output file "{}" on instance {} [status={}, error_msg={}]'.format(remote_file_path, instance.name, status, stderr))
+        error('could not output file "{}" on instance {} [status={}, error_msg={}]'
+              .format(remote_file_path, instance.name, status, stderr))
 
 
 @versions.command('create')
@@ -1047,11 +1048,11 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         action('Trying to retrieve information for analysis...')
         instances = get_instances_by_group_and_status(conn, group_name, 'running')
         if not instances:
-           error('Could not find any running instance for group {}'.format(group_name))
+            error('Could not find any running instance for group {}'.format(group_name))
         else:
-           instance = instances[0] # there can only be one
-           print_remote_file(instance, application_name, '/var/log/cloud-init-output.log')
-           ok()
+            instance = instances[0]  # there can only be one
+            print_remote_file(instance, application_name, '/var/log/cloud-init-output.log')
+            ok()
     else:
         ok()
 
