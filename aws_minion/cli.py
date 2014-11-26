@@ -23,6 +23,7 @@ from boto.ec2.elb import HealthCheck
 import botocore.session
 from bs4 import BeautifulSoup
 import click
+import keyring
 import requests
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
@@ -1205,7 +1206,7 @@ def get_saml_response(html):
 @cli.command()
 @click.option('--url', '-u', help='SAML identity provider URL')
 @click.option('--user', '-U', prompt='Username')
-@click.option('--password', '-p', prompt='Password', hide_input=True)
+@click.option('--password', '-p', help='Password')
 @click.pass_context
 def login(ctx, url, user, password):
     """
@@ -1219,6 +1220,11 @@ def login(ctx, url, user, password):
     session = requests.Session()
     response = session.get(url)
 
+    keyring_key = 'aws-minion.saml'
+    password = keyring.get_password(keyring_key, user)
+    if not password:
+        password = click.prompt('Password', hide_input=True)
+
     action('Authenticating against {url}..', **vars())
 
     data = {'j_username': user, 'j_password': password, 'submit': 'Login'}
@@ -1228,6 +1234,8 @@ def login(ctx, url, user, password):
         error('LOGIN FAILED')
         return
     ok()
+
+    keyring.set_password(keyring_key, user, password)
 
     tree = ElementTree.fromstring(saml_xml)
 
