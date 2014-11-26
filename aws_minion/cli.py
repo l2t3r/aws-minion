@@ -151,6 +151,7 @@ def cli(ctx, config_file):
         raise click.UsageError('Please run "minion configure" first.')
     ctx.obj = Context(data)
 
+
 def write_aws_credentials(key_id, secret, session_token=None):
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
@@ -165,6 +166,7 @@ def write_aws_credentials(key_id, secret, session_token=None):
     with open(credentials_path, 'w') as fd:
         fd.write(credentials_content)
 
+
 def ensure_aws_credentials():
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
@@ -172,8 +174,6 @@ def ensure_aws_credentials():
         key_id = click.prompt('AWS Access Key ID')
         secret = click.prompt('AWS Secret Access Key', hide_input=True)
         write_aws_credentials(key_id, secret)
-
-
 
 
 @cli.command()
@@ -1203,34 +1203,31 @@ def get_saml_response(html):
 
 
 @cli.command()
-@click.argument('url')
-@click.option('--user', '-u', prompt='Username')
+@click.option('--url', '-u', help='SAML identity provider URL')
+@click.option('--user', '-U', prompt='Username')
+@click.option('--password', '-p', prompt='Password', hide_input=True)
 @click.pass_context
-def login(ctx, url, user):
+def login(ctx, url, user, password):
     """
     Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
     """
+    url = url or ctx.obj.saml_identity_provider_url
+
+    if not url:
+        raise click.UsageError('Please specify SAML identity provider URL in config file or use "--url"')
+
     session = requests.Session()
     response = session.get(url)
 
-    password = click.prompt('Password', hide_input=True)
+    action('Authenticating against {url}..', **vars())
 
     data = {'j_username': user, 'j_password': password, 'submit': 'Login'}
-
-    action('Authenticating against {url}..', **vars())
     response2 = session.post(response.url, data=data)
     saml_xml = get_saml_response(response2.text)
     if not saml_xml:
         error('LOGIN FAILED')
         return
     ok()
-    #post_response = session.post(action_url, data={'SAMLResponse': codecs.encode(saml_xml.encode('utf-8'), 'base64')})
-    #print(post_response.text)
-    #action_url2, saml_xml2 = get_saml_response(post_response.text)
-    #post_response2 = session.post(action_url, data={'SAMLResponse': codecs.encode(saml_xml2.encode('utf-8'), 'base64'), 'roleIndex': 'arn:aws:iam::083693628624:role/Shibboleth-Administrator'})
-    #print(post_response2.text)
-    #print(session.cookies)
-
 
     tree = ElementTree.fromstring(saml_xml)
 
@@ -1242,11 +1239,7 @@ def login(ctx, url, user):
             for val in attribute.findall('{urn:oasis:names:tc:SAML:2.0:assertion}AttributeValue'):
                 provider_arn, role_arn = val.text.split(',')
 
-    conn = boto.sts.connect_to_region(ctx.obj.region, anon=True)
-    tree_xml = ElementTree.tostring(tree)
-    #print(tree_xml)
-    stuff = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
-    # print('aws', 'sts', 'assume-role-with-saml', '--role-arn', role_arn, '--principal-arn', provider_arn, '--saml-assertion', stuff)
+    saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
     session = botocore.session.get_session()
     sts = session.get_service('sts')
@@ -1254,26 +1247,27 @@ def login(ctx, url, user):
 
     endpoint = sts.get_endpoint(ctx.obj.region)
     endpoint._signature_version = None
-    http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn, SAMLAssertion=stuff)
+    http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn,
+                                                  SAMLAssertion=saml_assertion)
 
     key_id = response_data['Credentials']['AccessKeyId']
     secret = response_data['Credentials']['SecretAccessKey']
     session_token = response_data['Credentials']['SessionToken']
-    print('export AWS_ACCESS_KEY_ID="' + key_id + '"')
-    print('export AWS_SECRET_ACCESS_KEY="' + secret + '"')
-    print('export AWS_SESSION_TOKEN="' + session_token + '"')
-    print('export AWS_SECURITY_TOKEN="' + session_token + '"')
 
-    proceed = click.confirm('Do you want to overwrite your AWS credentials file with the new temporary access key?', default=True)
+    click.secho(dedent('''\
+    # environment variables with temporary AWS credentials:
+    export AWS_ACCESS_KEY_ID="{key_id}"
+    export AWS_SECRET_ACCESS_KEY="{secret}"
+    export AWS_SESSION_TOKEN="{session_token}")
+    export AWS_SECURITY_TOKEN="{session_token}"''').format(**vars()), fg='blue')
+
+    proceed = click.confirm('Do you want to overwrite your AWS credentials file with the new temporary access key?',
+                            default=True)
 
     if proceed:
         action('Writing temporary AWS credentials..')
         write_aws_credentials(key_id, secret, session_token)
         ok()
-
-
-
-
 
 
 def main():
