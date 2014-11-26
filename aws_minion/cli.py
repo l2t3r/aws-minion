@@ -471,7 +471,7 @@ def compensate(calculation_error, compensations, identifier, new_record_weights,
 
 
 def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr):
-    action('Setting weights..')
+    action('Setting weights for {dns_name}..', **vars())
     did_the_upsert = False
     for r in rr:
         if r.type == 'CNAME' and r.name == dns_name:
@@ -515,13 +515,13 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     lb = version.get_load_balancer()
     rr = zone.get_records()
     known_record_weights, partial_count, partial_sum = get_weights(dns_name, identifier, rr)
+    action('Calculating new weights..')
     compensations = {}
     if partial_count:
         delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
     else:
         delta = 0
         compensations[identifier] = FULL_PERCENTAGE - percentage
-        warning("Setting full percentage for the only available version")
         percentage = int(FULL_PERCENTAGE)
     new_record_weights = calculate_new_weights(delta, identifier, known_record_weights, percentage)
     total_weight = sum(new_record_weights.values())
@@ -530,6 +530,7 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     if calculation_error:
         forced_delta, percentage = compensate(calculation_error, compensations, identifier,
                                               new_record_weights, partial_count, percentage, identifier_versions)
+    ok()
     rows = [
         {
             'application_name': application_name,
