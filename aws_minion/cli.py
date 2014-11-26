@@ -932,7 +932,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     # Docker
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker rsyslog-gnutls
 
-    containerId=$(docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image})
+    containerId=$(docker run -d {env_options} --net=host {docker_image})
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
