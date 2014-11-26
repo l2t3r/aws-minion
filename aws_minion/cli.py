@@ -1227,6 +1227,7 @@ def login(ctx, url, user, password):
 
     action('Authenticating against {url}..', **vars())
 
+    # NOTE: parameters are hardcoded for Shibboleth IDP
     data = {'j_username': user, 'j_password': password, 'submit': 'Login'}
     response2 = session.post(response.url, data=data)
     saml_xml = get_saml_response(response2.text)
