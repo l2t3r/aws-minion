@@ -300,19 +300,10 @@ def applications(ctx):
     Manage applications, list all apps
     """
     if not ctx.invoked_subcommand:
-        # list apps
-        region = ctx.obj.region
-        vpc = ctx.obj.vpc
-
-        conn = boto.ec2.connect_to_region(region)
-
         rows = []
-        all_security_groups = conn.get_all_security_groups()
-        for _sg in all_security_groups:
-            if _sg.name.startswith('app-') and _sg.vpc_id == vpc and not _sg.name.endswith('-lb'):
-                manifest = yaml.safe_load(_sg.tags['Manifest'])
-                rows.append({k: str(v) for k, v in manifest.items()})
-        rows.sort(key=lambda x: (x['application_name']))
+        for app in ctx.obj.get_applications():
+            rows.append({k: str(v) for k, v in app.manifest.items()})
+        rows.sort()
         print_table('application_name team_name exposed_ports stateful'.split(), rows)
 
 

@@ -16,6 +16,7 @@ class ApplicationNotFound(Exception):
         return 'Application "{}" does not exist'.format(self.application_name)
 
 
+@functools.total_ordering
 class Application:
 
     def __init__(self, name: str, security_group):
@@ -26,6 +27,12 @@ class Application:
     @property
     def identifier(self) -> str:
         return IDENTIFIER_PREFIX + self.name
+
+    def __lt__(self, other):
+        return self.name < other.name
+
+    def __eq__(self, other):
+        return self.name == other.name
 
 
 @functools.total_ordering
@@ -103,6 +110,16 @@ class Context:
             raise ApplicationNotFound(application_name)
         app = Application(application_name, security_group)
         return app
+
+    def get_applications(self) -> list:
+        conn = boto.ec2.connect_to_region(self.region)
+
+        rows = []
+        all_security_groups = conn.get_all_security_groups()
+        for _sg in all_security_groups:
+            if _sg.name.startswith(IDENTIFIER_PREFIX) and _sg.vpc_id == self.vpc and not _sg.name.endswith('-lb'):
+                rows.append(Application(_sg.name[len(IDENTIFIER_PREFIX):], _sg))
+        return []
 
     def get_versions(self, application_name: str=None, application_version: str=None) -> [ApplicationVersion]:
         """
