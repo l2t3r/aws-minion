@@ -24,11 +24,11 @@ from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 
 
-# Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 from aws_minion.console import print_table, action, ok, error, warning
 from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.utils import FloatRange
 
+# FIXME: hardcoded for eu-west-1: Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 AMI_ID = 'ami-f0b11187'
 
 CONFIG_DIR_PATH = click.get_app_dir('aws-minion')
