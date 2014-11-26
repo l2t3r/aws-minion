@@ -8,6 +8,7 @@ import random
 import time
 import datetime
 import re
+from xml.etree import ElementTree
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
@@ -19,6 +20,7 @@ from boto.ec2.autoscale import AutoScalingGroup
 import boto.manage.cmdshell
 from boto.ec2.elb import HealthCheck
 import click
+import requests
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
@@ -1172,6 +1174,49 @@ def delete(ctx, application_name: str):
     lb_sg = ctx.obj.get_security_group(lb_sg_name)
     lb_sg.delete()
     ok()
+
+
+def get_saml_response(html):
+    """
+    Parse SAMLResponse from Shibboleth page
+
+    >>> get_saml_response('<input name="a"/>')
+
+    >>> get_saml_response('<body xmlns="bla"><form><input name="SAMLResponse" value="eG1s"/></form></body>')
+    b'xml'
+    """
+    tree = ElementTree.fromstring(html)
+
+    ns = tree.tag.split('}')[0]
+    ns += '}'
+    for elem in tree.findall('.//' + ns + 'input[@name]'):
+        if elem.attrib['name'] == 'SAMLResponse':
+            saml_base64 = elem.attrib['value']
+            xml = codecs.decode(saml_base64.encode('ascii'), 'base64')
+            return xml
+
+
+@cli.command()
+@click.argument('url')
+@click.pass_context
+def login(ctx, url):
+    """
+    Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
+    """
+    session = requests.Session()
+    response = session.get(url)
+
+    user = click.prompt('Username')
+    password = click.prompt('Password', hide_input=True)
+
+    data = {'j_username': user, 'j_password': password, 'submit': 'Login'}
+
+    response2 = session.post(response.url, data=data)
+    saml_xml = get_saml_response(response2.text)
+    print(saml_xml)
+
+    tree = ElementTree.fromstring(saml_xml)
+    print(tree)
 
 
 def main():
