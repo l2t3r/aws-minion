@@ -1237,15 +1237,33 @@ def login(ctx, url, user, password):
 
     keyring.set_password(keyring_key, user, password)
 
+    action('Checking SAML roles..')
     tree = ElementTree.fromstring(saml_xml)
 
     assertion = tree.find('{urn:oasis:names:tc:SAML:2.0:assertion}Assertion')
 
-    provider_arn = role_arn = None
+    roles = []
     for attribute in assertion.findall('.//{urn:oasis:names:tc:SAML:2.0:assertion}Attribute[@Name]'):
         if attribute.attrib['Name'] == 'https://aws.amazon.com/SAML/Attributes/Role':
             for val in attribute.findall('{urn:oasis:names:tc:SAML:2.0:assertion}AttributeValue'):
                 provider_arn, role_arn = val.text.split(',')
+                roles.append((provider_arn, role_arn))
+
+    if not roles:
+        error('NO VALID ROLE FOUND')
+        return
+    ok()
+
+    if len(roles) == 1:
+        provider_arn, role_arn = roles[0]
+    else:
+        click.secho('Multiple roles found, please select..')
+        i = 1
+        for _, role_arn in sorted(roles):
+            click.secho('{}) {}'.format(i, role_arn))
+            i += 1
+        index = int(click.prompt('Select'))
+        provider_arn, role_arn = roles[index-1]
 
     saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
