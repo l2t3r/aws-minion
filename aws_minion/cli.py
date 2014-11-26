@@ -818,20 +818,21 @@ def is_docker_image_valid(docker_image: str):
         return False
 
 
-def get_instance_by_group_and_status(conn, group_name: str, status: str):
+def get_instances_by_group_and_status(conn, group_name: str, status: str):
     """
-    Determines EC2 instance with tag:Name == group_name and specified status
+    Determines EC2 instances with tag:Name == group_name and specified status
     """
+    running_instances_list = []
     instances = conn.get_only_instances(filters={'tag:Name': group_name})
     if len(instances) == 0:
         error('could not find any instance with tag:Name : {}'.format(group_name))
-        return None
+        return running_instances_list
 
     for instance in instances:
         if instance.state == 'running':
-            return instance
+           running_instances_list.append(instance)
 
-    return None
+    return running_instances_list
 
 
 def get_key_file_path_by_app_name(app_name: str):
@@ -844,25 +845,17 @@ def get_key_file_path_by_app_name(app_name: str):
     return os.path.join(key_dir, '%s.pem' % key_name)
 
 
-def print_cloud_init_log(conn, application_name: str, group_name: str):
+def print_remote_file(instance, application_name: str, remote_file_path: str):
     """
-    Prints out /var/log/cloud-init-output.log of a running instance.
-    Note: this function is intended to be called by `create_version(..)`
-          where only one running instance is created initially
+    Prints out the given file located on the specified instance.
 
     parameters:
 
-    conn:             boto region connection
+    instance:         target EC2 instance
     application_name: name of the application e.g. 'logmeister'
-    group_name:       name of the application combined with version e.g. 'app-logmeister-0.4'
-                      Note: group_name has to correspond to instance's tag:Name
+    remote_file_path: path of the target file on the EC2 instance
     """
-
-    instance = get_instance_by_group_and_status(conn, group_name, 'running')
-    if instance is None:
-        error('could not find any active instance')
-        return
-
+    
     key_file = get_key_file_path_by_app_name(application_name)
     if not os.path.exists(key_file):
         error('could not find ssh key file {}'.format(key_file))
@@ -872,12 +865,15 @@ def print_cloud_init_log(conn, application_name: str, group_name: str):
                                          ssh_key_file=key_file,
                                          user_name='ubuntu')
 
-    status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
+    # status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
+
+    # NOTE: cat paramter is enclosed with " to avoid code injection e.g. 'cat /var/log/mylog ; rm something'
+    status, stdout, stderr = ssh_client.run('cat "{}"'.format(remote_file_path))
     if status == 0:
         print('see cloud-init log for analysis:')
         print(codecs.decode(stdout, "unicode_escape"))
     else:
-        error('could fetch cloud-init log')
+        error('could not output file "{}" on instance {} [status={}, error_msg={}]'.format(remote_file_path, instance.name, status, stderr))
 
 
 @versions.command('create')
@@ -1048,8 +1044,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         error('ABORTED. Default health check time to wait for members to become active has been exceeded.' +
               ' There might be a problem with your application')
 
-        print('trying to retrieve information for analysis...')
-        print_cloud_init_log(conn, application_name, group_name)
+        action('Trying to retrieve information for analysis...')
+        instances = get_instances_by_group_and_status(conn, group_name, 'running')
+        if not instances:
+           error('Could not find any running instance for group {}'.format(group_name))
+        else:
+           instance = instances[0] # there can only be one
+           print_remote_file(instance, application_name, '/var/log/cloud-init-output.log')
+           ok()
     else:
         ok()
 
