@@ -23,7 +23,6 @@ import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 
-
 # Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 from aws_minion.console import print_table, action, ok, error, warning
 from aws_minion.context import Context, ApplicationNotFound
@@ -217,7 +216,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
                                        default=param_value,
                                        hide_input=hide_input,
                                        show_default=show_default).strip()
-            if abort and not param_value:
+            if abort and param_value is None:
                 raise click.Abort('{} should be provided'.format(msg))
 
         data[name] = param_value
@@ -837,11 +836,11 @@ def print_remote_file(instance, application, remote_file_path: str):
                                          ssh_key_file=key_file,
                                          user_name='ubuntu')
 
-    # NOTE: cat paramter is enclosed with " to avoid code injection e.g. 'cat /var/log/mylog ; rm something'
-    status, stdout, stderr = ssh_client.run('cat "{}"'.format(remote_file_path))
+    remote_file_path = shlex.quote(remote_file_path)
+    status, stdout, stderr = ssh_client.run('cat {}'.format(remote_file_path))
     if status == 0:
-        print('see cloud-init log for analysis:')
-        print(codecs.decode(stdout, "unicode_escape"))
+        click.echo('see cloud-init log for analysis:')
+        click.echo(codecs.decode(stdout, "unicode_escape"))
     else:
         error('could not output file "{}" on instance {} [status={}, error_msg={}]'
               .format(remote_file_path, instance.name, status, stderr))

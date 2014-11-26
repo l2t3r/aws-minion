@@ -34,7 +34,7 @@ class Application:
         SSH key file which was created in `configure`
         """
         key_dir = os.path.expanduser('~/.ssh')
-        return os.path.join(key_dir, '%s.pem' % self.identifier)
+        return os.path.join(key_dir, '{}.pem'.format(self.identifier))
 
 
 @functools.total_ordering
@@ -162,12 +162,7 @@ class Context:
         return res
 
     def get_instances_by_app_identifier_and_state(self, app_identifier: str, state: str) -> [ApplicationInstance]:
-        instances = self.get_instances()
-        res = []
-        for instance in instances:
-            if instance.state == state and instance.tags['Name'] == app_identifier:
-                res.append(instance)
-        return res
+        return [i for i in self.get_instances() if i.state == state and i.tags['Name'] == app_identifier]
 
     def find_ssl_certificate_arn(self) -> str:
         iam_conn = boto.iam.connect_to_region(self.region)
