@@ -4,6 +4,7 @@ import boto.iam
 from boto.ec2.elb import LoadBalancer
 import functools
 import yaml
+import os
 
 IDENTIFIER_PREFIX = 'app-'
 
@@ -26,6 +27,14 @@ class Application:
     @property
     def identifier(self) -> str:
         return IDENTIFIER_PREFIX + self.name
+
+    def get_key_file_path(self):
+        """
+        Constructs the path to the application's (or rather to the instances running the application)
+        SSH key file which was created in `configure`
+        """
+        key_dir = os.path.expanduser('~/.ssh')
+        return os.path.join(key_dir, '%s.pem' % self.identifier)
 
 
 @functools.total_ordering
@@ -150,6 +159,14 @@ class Context:
         for inst in instances:
             if 'Name' in inst.tags and inst.tags['Name'].startswith(IDENTIFIER_PREFIX) and inst.vpc_id == self.vpc:
                 res.append(ApplicationInstance(inst))
+        return res
+
+    def get_instances_by_app_identifier_and_state(self, app_identifier: str, state: str) -> [ApplicationInstance]:
+        instances = self.get_instances()
+        res = []
+        for instance in instances:
+            if instance.state == state and instance.tags['Name'] == app_identifier:
+                res.append(instance)
         return res
 
     def find_ssl_certificate_arn(self) -> str:

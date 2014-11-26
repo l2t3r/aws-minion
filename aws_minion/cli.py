@@ -818,34 +818,7 @@ def is_docker_image_valid(docker_image: str):
         return False
 
 
-def get_instances_by_group_and_status(conn, group_name: str, status: str):
-    """
-    Determines EC2 instances with tag:Name == group_name and specified status
-    """
-    running_instances_list = []
-    instances = conn.get_only_instances(filters={'tag:Name': group_name})
-    if len(instances) == 0:
-        error('could not find any instance with tag:Name : {}'.format(group_name))
-        return running_instances_list
-
-    for instance in instances:
-        if instance.state == 'running':
-            running_instances_list.append(instance)
-
-    return running_instances_list
-
-
-def get_key_file_path_by_app_name(app_name: str):
-    """
-    Constructs the path to the application's (or rather to the instances running the application)
-    SSH key file which was created in `configure`
-    """
-    key_name = 'app-{}'.format(app_name)
-    key_dir = os.path.expanduser('~/.ssh')
-    return os.path.join(key_dir, '%s.pem' % key_name)
-
-
-def print_remote_file(instance, application_name: str, remote_file_path: str):
+def print_remote_file(instance, application, remote_file_path: str):
     """
     Prints out the given file located on the specified instance.
 
@@ -855,8 +828,7 @@ def print_remote_file(instance, application_name: str, remote_file_path: str):
     application_name: name of the application e.g. 'logmeister'
     remote_file_path: path of the target file on the EC2 instance
     """
-
-    key_file = get_key_file_path_by_app_name(application_name)
+    key_file = application.get_key_file_path()
     if not os.path.exists(key_file):
         error('could not find ssh key file {}'.format(key_file))
         return
@@ -864,8 +836,6 @@ def print_remote_file(instance, application_name: str, remote_file_path: str):
     ssh_client = sshclient_from_instance(instance,
                                          ssh_key_file=key_file,
                                          user_name='ubuntu')
-
-    # status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
 
     # NOTE: cat paramter is enclosed with " to avoid code injection e.g. 'cat /var/log/mylog ; rm something'
     status, stdout, stderr = ssh_client.run('cat "{}"'.format(remote_file_path))
@@ -898,7 +868,6 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
 
-    conn = boto.ec2.connect_to_region(region)
     app = ctx.obj.get_application(application_name)
     sg, manifest = app.security_group, app.manifest
 
@@ -1046,12 +1015,12 @@ def create_version(ctx, application_name: str, application_version: str, docker_
               ' There might be a problem with your application')
 
         action('Trying to retrieve information for analysis...')
-        instances = get_instances_by_group_and_status(conn, group_name, 'running')
+        instances = ctx.obj.get_instances_by_app_identifier_and_state(group_name, 'running')
         if not instances:
             error('Could not find any running instance for group {}'.format(group_name))
         else:
             instance = instances[0]  # there can only be one
-            print_remote_file(instance, application_name, '/var/log/cloud-init-output.log')
+            print_remote_file(instance, app, '/var/log/cloud-init-output.log')
             ok()
     else:
         ok()
