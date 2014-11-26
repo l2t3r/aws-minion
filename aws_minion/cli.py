@@ -162,6 +162,7 @@ def write_aws_credentials(key_id, secret, session_token=None):
             aws_secret_access_key = {secret}
             ''').format(key_id=key_id, secret=secret)
     if session_token:
+        # apparently the different AWS SDKs either use "session_token" or "security_token", so set both
         credentials_content += 'aws_session_token = {}\n'.format(session_token)
         credentials_content += 'aws_security_token = {}\n'.format(session_token)
     with open(credentials_path, 'w') as fd:
@@ -1281,6 +1282,7 @@ def login(ctx, url, user, password):
     secret = response_data['Credentials']['SecretAccessKey']
     session_token = response_data['Credentials']['SessionToken']
 
+    # different AWS SDKs expect either AWS_SESSION_TOKEN or AWS_SECURITY_TOKEN, so set both
     click.secho(dedent('''\
     # environment variables with temporary AWS credentials:
     export AWS_ACCESS_KEY_ID="{key_id}"
