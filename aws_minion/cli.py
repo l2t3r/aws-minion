@@ -52,6 +52,7 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 HEALTH_CHECK_TIMEOUT_IN_S = 5
 HEALTH_CHECK_INTERVAL_IN_S = 20
 UNHEALTHY_THRESHOLD = 5
+EXTRA_WAIT_TIME = 180
 SLEEP_TIME_IN_S = 5
 
 
@@ -1034,7 +1035,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     # calculate max number of iterations corresponding to the max time range after which AWS declares
     # a member as 'OutOfService'
-    max_wait_time = UNHEALTHY_THRESHOLD * (HEALTH_CHECK_TIMEOUT_IN_S + HEALTH_CHECK_INTERVAL_IN_S)
+    max_wait_time = EXTRA_WAIT_TIME + UNHEALTHY_THRESHOLD * (HEALTH_CHECK_TIMEOUT_IN_S + HEALTH_CHECK_INTERVAL_IN_S)
     max_iterations = (max_wait_time / SLEEP_TIME_IN_S) + 1
 
     j = 0
