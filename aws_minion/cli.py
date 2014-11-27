@@ -29,7 +29,7 @@ import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 
-from aws_minion.console import print_table, action, ok, error, warning, choice
+from aws_minion.console import print_table, action, ok, error, warning, choice, Action
 from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.utils import FloatRange
 
@@ -253,59 +253,53 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
 
     region = ask('AWS region ID', 'region', suggestion='eu-west-1')
 
-    action('Connecting to region {region}..', **vars())
-    vpc_conn = boto.vpc.connect_to_region(region)
-    if not vpc_conn:
-        error('FAILED')
-        return
-    ok()
+    with Action('Connecting to region {region}..', **vars()) as act:
+        vpc_conn = boto.vpc.connect_to_region(region)
+        if not vpc_conn:
+            act.error('FAILED')
+            return
 
     if not vpc and not data.get('vpc'):
-        action('Trying to autodetect VPC..')
-        vpcs = [v for v in vpc_conn.get_all_vpcs() if not v.is_default]
-        if len(vpcs) == 1:
-            data['vpc'] = vpcs[0].id
-        ok()
+        with Action('Trying to autodetect VPC..'):
+            vpcs = [v for v in vpc_conn.get_all_vpcs() if not v.is_default]
+            if len(vpcs) == 1:
+                data['vpc'] = vpcs[0].id
 
     vpc = ask('AWS VPC ID', 'vpc', suggestion='vpc-abcd1234', callback=validate_vpc_id)
 
-    action('Checking VPC {vpc}..', **vars())
-    try:
-        subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
-    except:
-        error('VPC NOT FOUND')
-        return
-    if not subnets:
-        error('NO SUBNETS')
-        return
-    ok()
+    with Action('Checking VPC {vpc}..', **vars()) as act:
+        try:
+            subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
+        except:
+            act.error('VPC NOT FOUND')
+            return
+        if not subnets:
+            act.error('NO SUBNETS')
+            return
 
     if not domain and not data.get('domain'):
-        action('Trying to autodetect DNS domain..')
-        dns_conn = boto.route53.connect_to_region(region)
-        if not dns_conn:
-            error('CONNECTION FAILED')
-            return
-        zones = dns_conn.get_zones()
-        if len(zones) == 1:
-            data['domain'] = zones[0].name.rstrip('.')
-        ok()
+        with Action('Trying to autodetect DNS domain..') as act:
+            dns_conn = boto.route53.connect_to_region(region)
+            if not dns_conn:
+                act.error('CONNECTION FAILED')
+                return
+            zones = dns_conn.get_zones()
+            if len(zones) == 1:
+                data['domain'] = zones[0].name.rstrip('.')
 
     domain = ask('DNS domain', 'domain', suggestion='apps.myorganization.org')
 
-    action('Checking domain {domain}..', **vars())
-    dns_conn = boto.route53.connect_to_region(region)
-    zone = dns_conn.get_zone(domain + '.')
-    if not zone:
-        error('ZONE NOT FOUND')
-        return
-    ok()
+    with Action('Checking domain {domain}..', **vars()) as act:
+        dns_conn = boto.route53.connect_to_region(region)
+        zone = dns_conn.get_zone(domain + '.')
+        if not zone:
+            act.error('ZONE NOT FOUND')
+            return
 
     if not ssl_certificate_arn and not data.get('ssl_certificate_arn'):
-        action('Trying to autodetect SSL certificate..')
-        temp_context = Context({'region': region, 'domain': domain})
-        data['ssl_certificate_arn'] = temp_context.find_ssl_certificate_arn()
-        ok()
+        with Action('Trying to autodetect SSL certificate..'):
+            temp_context = Context({'region': region, 'domain': domain})
+            data['ssl_certificate_arn'] = temp_context.find_ssl_certificate_arn()
 
     ask('SSL certificate ARN (enter "-" to skip)', 'ssl_certificate_arn',
         suggestion='arn:aws:iam::123:server-certificate/mycert')
@@ -323,10 +317,9 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
         ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
             hide_input=True)
 
-    action('Storing configuration in {path}..', path=CONFIG_FILE_PATH)
-    with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
-        fd.write(yaml.dump(data, default_flow_style=False))
-    ok()
+    with Action('Storing configuration in {path}..', path=CONFIG_FILE_PATH):
+        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
+            fd.write(yaml.dump(data, default_flow_style=False))
     ctx.obj = Context(data)
 
 
@@ -544,22 +537,21 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     lb = version.get_load_balancer()
     rr = zone.get_records()
     known_record_weights, partial_count, partial_sum = get_weights(dns_name, identifier, rr)
-    action('Calculating new weights..')
-    compensations = {}
-    if partial_count:
-        delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
-    else:
-        delta = 0
-        compensations[identifier] = FULL_PERCENTAGE - percentage
-        percentage = int(FULL_PERCENTAGE)
-    new_record_weights = calculate_new_weights(delta, identifier, known_record_weights, percentage)
-    total_weight = sum(new_record_weights.values())
-    calculation_error = FULL_PERCENTAGE - total_weight
-    forced_delta = None
-    if calculation_error:
-        forced_delta, percentage = compensate(calculation_error, compensations, identifier,
-                                              new_record_weights, partial_count, percentage, identifier_versions)
-    ok()
+    with Action('Calculating new weights..'):
+        compensations = {}
+        if partial_count:
+            delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
+        else:
+            delta = 0
+            compensations[identifier] = FULL_PERCENTAGE - percentage
+            percentage = int(FULL_PERCENTAGE)
+        new_record_weights = calculate_new_weights(delta, identifier, known_record_weights, percentage)
+        total_weight = sum(new_record_weights.values())
+        calculation_error = FULL_PERCENTAGE - total_weight
+        forced_delta = None
+        if calculation_error:
+            forced_delta, percentage = compensate(calculation_error, compensations, identifier,
+                                                  new_record_weights, partial_count, percentage, identifier_versions)
     rows = [
         {
             'application_name': application_name,
@@ -601,11 +593,9 @@ def scale(ctx, application_name, application_version, desired_instances: int):
 
     version = ctx.obj.get_version(application_name, application_version)
 
-    action('Scaling application {application_name} version {application_version} to {desired_instances} instances',
-           **vars())
-
-    version.auto_scaling_group.set_capacity(desired_instances)
-    ok()
+    with Action('Scaling application {application_name} version {application_version} to {desired_instances} instances',
+                **vars()):
+        version.auto_scaling_group.set_capacity(desired_instances)
 
 
 @versions.command('delete')
@@ -629,29 +619,27 @@ def delete_version(ctx, application_name: str, application_version: str):
     # Disable traffic to this version
     change_version_traffic(application_name, application_version, ctx.obj, 0.0)
 
-    action('Shutting down {instance_count} instances..', instance_count=len(running_instance_ids))
-    version.auto_scaling_group.shutdown_instances()
+    with Action('Shutting down {instance_count} instances..', instance_count=len(running_instance_ids)) as act:
+        version.auto_scaling_group.shutdown_instances()
 
-    # wait for shutdown
-    while running_instance_ids:
-        instances = conn.get_only_instances(instance_ids=list(running_instance_ids))
-        for instance in instances:
-            if instance.state.lower() == 'terminated':
-                running_instance_ids.remove(instance.id)
-        time.sleep(3)
-        click.secho(' .', nl=False)
-    ok()
-
-    action('Deleting auto scaling group..')
-    while True:
-        try:
-            version.auto_scaling_group.delete()
-            break
-        except:
-            # You cannot delete an AutoScalingGroup while there are scaling activities in progress for that group.
+        # wait for shutdown
+        while running_instance_ids:
+            instances = conn.get_only_instances(instance_ids=list(running_instance_ids))
+            for instance in instances:
+                if instance.state.lower() == 'terminated':
+                    running_instance_ids.remove(instance.id)
             time.sleep(3)
-            click.secho(' .', nl=False)
-    ok()
+            act.progress()
+
+    with Action('Deleting auto scaling group..') as act:
+        while True:
+            try:
+                version.auto_scaling_group.delete()
+                break
+            except:
+                # You cannot delete an AutoScalingGroup while there are scaling activities in progress for that group.
+                time.sleep(3)
+                act.progress()
 
     lcs = autoscale.get_all_launch_configurations(
         names=['app-{}-{}'.format(application_name, application_version)])
@@ -659,14 +647,11 @@ def delete_version(ctx, application_name: str, application_version: str):
     for lc in lcs:
         lc.delete()
 
-    action('Deleting load balancer..')
-    elb_conn = boto.ec2.elb.connect_to_region(region)
-    lbs = elb_conn.get_all_load_balancers(load_balancer_names='app-{}-{}'.format(application_name,
-                                                                                 application_version.replace('.', '-')))
-
-    for lb in lbs:
-        lb.delete()
-    ok()
+    with Action('Deleting load balancer..'):
+        elb_conn = boto.ec2.elb.connect_to_region(region)
+        lbs = elb_conn.get_all_load_balancers(load_balancer_names=version.dns_identifier)
+        for lb in lbs:
+            lb.delete()
 
 
 def generate_env_options(env_vars: dict):
@@ -940,17 +925,16 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     vpc_info = ','.join([subnet.id for subnet in subnets])
 
-    action('Creating launch configuration for {application_name} version {application_version}..', **vars())
-    lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
-                             image_id=AMI_ID,
-                             key_name=key_name,
-                             security_groups=[sg.id],
-                             user_data=init_script.encode('utf-8'),
-                             instance_type=manifest.get('instance_type', 't2.micro'),
-                             instance_profile_name=app.identifier,
-                             associate_public_ip_address=True)
-    autoscale.create_launch_configuration(lc)
-    ok()
+    with Action('Creating launch configuration for {application_name} version {application_version}..', **vars()):
+        lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
+                                 image_id=AMI_ID,
+                                 key_name=key_name,
+                                 security_groups=[sg.id],
+                                 user_data=init_script.encode('utf-8'),
+                                 instance_type=manifest.get('instance_type', 't2.micro'),
+                                 instance_profile_name=app.identifier,
+                                 associate_public_ip_address=True)
+        autoscale.create_launch_configuration(lc)
 
     lb_sg_name = 'app-{}-lb'.format(application_name)
     lb_sg = ctx.obj.get_security_group(lb_sg_name)
@@ -965,17 +949,16 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         target='HTTP:{}{}'.format(manifest['exposed_ports'][0], manifest.get('health_check_http_path', '/'))
     )
 
-    action('Creating load balancer for {application_name} version {application_version}..', **vars())
-    ssl_cert_arn = ctx.obj.config.get('ssl_certificate_arn')
-    if ssl_cert_arn:
-        ports = [(443, manifest['exposed_ports'][0], 'https', ssl_cert_arn)]
-    else:
-        ports = [(80, manifest['exposed_ports'][0], 'http')]
-    elb_conn = boto.ec2.elb.connect_to_region(region)
-    lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
-                                       subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
-    lb.configure_health_check(hc)
-    ok()
+    with Action('Creating load balancer for {application_name} version {application_version}..', **vars()):
+        ssl_cert_arn = ctx.obj.config.get('ssl_certificate_arn')
+        if ssl_cert_arn:
+            ports = [(443, manifest['exposed_ports'][0], 'https', ssl_cert_arn)]
+        else:
+            ports = [(80, manifest['exposed_ports'][0], 'http')]
+        elb_conn = boto.ec2.elb.connect_to_region(region)
+        lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
+                                           subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
+        lb.configure_health_check(hc)
 
     group_name = 'app-{}-{}'.format(application_name, application_version)
 
@@ -1012,18 +995,17 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     click.secho('DNS name of load balancer is {}'.format(lb.dns_name), fg='blue', bold=True)
 
-    action('Waiting for instance start and LB..')
-    lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
-    j = 0
-    while not lb.instances:
-        if j > 100:
-            error('Max wait time for LB instances exceeded.')
-            break
-        time.sleep(3)
-        click.secho(' .', nl=False)
+    with Action('Waiting for instance start and LB..') as act:
         lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
-        j += 0
-    ok()
+        j = 0
+        while not lb.instances:
+            if j > 100:
+                error('Max wait time for LB instances exceeded.')
+                break
+            time.sleep(3)
+            act.progress()
+            lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]
+            j += 0
 
     action('Waiting for LB members to become active..')
 
@@ -1079,66 +1061,62 @@ def create(ctx, manifest_file):
 
     conn = boto.ec2.connect_to_region(region)
 
-    action('Checking whether application {application_name} exists..', **vars())
-    try:
-        ctx.obj.get_application(application_name)
-        error('ALREADY EXISTS, ABORTING')
-        return
-    except ApplicationNotFound:
-        ok()
+    with Action('Checking whether application {application_name} exists..', **vars()) as act:
+        try:
+            ctx.obj.get_application(application_name)
+            act.error('ALREADY EXISTS, ABORTING')
+            return
+        except ApplicationNotFound:
+            pass
 
     sg_name = 'app-{}'.format(application_name)
 
-    action('Creating key pair for application {application_name}..', **vars())
-    key_name = sg_name
-    key = conn.create_key_pair(key_name)
-    key_dir = os.path.expanduser('~/.ssh')
-    try:
-        key.save(key_dir)
-    except TypeError:
-        # HACK to circumvent missing merge of https://github.com/boto/boto/pull/2758
-        file_path = os.path.join(key_dir, '%s.pem' % key.name)
-        if os.path.exists(file_path):
-            os.unlink(file_path)
-        key.material = key.material.encode('ascii')
-        key.save(key_dir)
-    ok()
+    with Action('Creating key pair for application {application_name}..', **vars()):
+        key_name = sg_name
+        key = conn.create_key_pair(key_name)
+        key_dir = os.path.expanduser('~/.ssh')
+        try:
+            key.save(key_dir)
+        except TypeError:
+            # HACK to circumvent missing merge of https://github.com/boto/boto/pull/2758
+            file_path = os.path.join(key_dir, '%s.pem' % key.name)
+            if os.path.exists(file_path):
+                os.unlink(file_path)
+            key.material = key.material.encode('ascii')
+            key.save(key_dir)
 
-    action('Creating application security group {sg_name}..', **vars())
-    sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
-    # HACK: add manifest as tag
-    sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+    with Action('Creating application security group {sg_name}..', **vars()):
+        sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
+        # HACK: add manifest as tag
+        sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-    rules = [
-        SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-        SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
-    ]
+        rules = [
+            SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
+            SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
+        ]
 
-    for rule in rules:
-        modify_sg(conn, sg, rule, authorize=True)
-    ok()
+        for rule in rules:
+            modify_sg(conn, sg, rule, authorize=True)
 
     lb_sg_name = sg_name + '-lb'
-    action('Creating LB security group {lb_sg_name}..', **vars())
-    sg = conn.create_security_group(lb_sg_name, 'LB security group', vpc_id=vpc)
-    # HACK: add manifest as tag
-    sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+    with Action('Creating LB security group {lb_sg_name}..', **vars()):
+        sg = conn.create_security_group(lb_sg_name, 'LB security group', vpc_id=vpc)
+        # HACK: add manifest as tag
+        sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-    rules = [
-        SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
-        SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
-    ]
+        rules = [
+            SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
+            SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
+        ]
 
-    for rule in rules:
-        modify_sg(conn, sg, rule, authorize=True)
-    ok()
+        for rule in rules:
+            modify_sg(conn, sg, rule, authorize=True)
 
-    action('Creating IAM role and instance profile..')
-    iam_conn = boto.iam.connect_to_region(region)
-    iam_conn.create_role(sg_name)
-    iam_conn.create_instance_profile(sg_name)
-    iam_conn.add_role_to_instance_profile(instance_profile_name=sg_name, role_name=sg_name)
-    ok()
+    with Action('Creating IAM role and instance profile..'):
+        iam_conn = boto.iam.connect_to_region(region)
+        iam_conn.create_role(sg_name)
+        iam_conn.create_instance_profile(sg_name)
+        iam_conn.add_role_to_instance_profile(instance_profile_name=sg_name, role_name=sg_name)
 
 
 @applications.command()
@@ -1155,32 +1133,28 @@ def delete(ctx, application_name: str):
 
     sg = app.security_group
 
-    action('Deleting security group..')
-    while True:
-        try:
-            sg.delete()
-        except:
-            time.sleep(3)
-            click.secho(' .', nl=False)
-    ok()
+    with Action('Deleting security group..') as act:
+        while True:
+            try:
+                sg.delete()
+            except:
+                time.sleep(3)
+                act.progress()
 
-    action('Deleting keypair..')
-    keypair = conn.get_key_pair(sg.name)
-    keypair.delete()
-    ok()
+    with Action('Deleting keypair..'):
+        keypair = conn.get_key_pair(sg.name)
+        keypair.delete()
 
-    action('Deleting IAM role..')
-    iam_conn = boto.iam.connect_to_region(region)
-    iam_conn.remove_role_from_instance_profile(instance_profile_name=sg.name, role_name=sg.name)
-    iam_conn.delete_instance_profile(sg.name)
-    iam_conn.delete_role(sg.name)
-    ok()
+    with Action('Deleting IAM role..'):
+        iam_conn = boto.iam.connect_to_region(region)
+        iam_conn.remove_role_from_instance_profile(instance_profile_name=sg.name, role_name=sg.name)
+        iam_conn.delete_instance_profile(sg.name)
+        iam_conn.delete_role(sg.name)
 
-    action('Deleting LB security group..')
-    lb_sg_name = 'app-{}-lb'.format(application_name)
-    lb_sg = ctx.obj.get_security_group(lb_sg_name)
-    lb_sg.delete()
-    ok()
+    with Action('Deleting LB security group..'):
+        lb_sg_name = 'app-{}-lb'.format(application_name)
+        lb_sg = ctx.obj.get_security_group(lb_sg_name)
+        lb_sg.delete()
 
 
 def send_request_to_loggly(ctx, request: str):
@@ -1286,35 +1260,32 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
     if not password:
         password = click.prompt('Password', hide_input=True)
 
-    action('Authenticating against {url}..', **vars())
-
-    # NOTE: parameters are hardcoded for Shibboleth IDP
-    data = {'j_username': user, 'j_password': password, 'submit': 'Login'}
-    response2 = session.post(response.url, data=data)
-    saml_xml = get_saml_response(response2.text)
-    if not saml_xml:
-        error('LOGIN FAILED')
-        return
-    ok()
+    with Action('Authenticating against {url}..', **vars()) as act:
+        # NOTE: parameters are hardcoded for Shibboleth IDP
+        data = {'j_username': user, 'j_password': password, 'submit': 'Login'}
+        response2 = session.post(response.url, data=data)
+        saml_xml = get_saml_response(response2.text)
+        if not saml_xml:
+            act.error('LOGIN FAILED')
+            return
 
     keyring.set_password(keyring_key, user, password)
 
-    action('Checking SAML roles..')
-    tree = ElementTree.fromstring(saml_xml)
+    with Action('Checking SAML roles..') as act:
+        tree = ElementTree.fromstring(saml_xml)
 
-    assertion = tree.find('{urn:oasis:names:tc:SAML:2.0:assertion}Assertion')
+        assertion = tree.find('{urn:oasis:names:tc:SAML:2.0:assertion}Assertion')
 
-    roles = []
-    for attribute in assertion.findall('.//{urn:oasis:names:tc:SAML:2.0:assertion}Attribute[@Name]'):
-        if attribute.attrib['Name'] == 'https://aws.amazon.com/SAML/Attributes/Role':
-            for val in attribute.findall('{urn:oasis:names:tc:SAML:2.0:assertion}AttributeValue'):
-                provider_arn, role_arn = val.text.split(',')
-                roles.append((provider_arn, role_arn))
+        roles = []
+        for attribute in assertion.findall('.//{urn:oasis:names:tc:SAML:2.0:assertion}Attribute[@Name]'):
+            if attribute.attrib['Name'] == 'https://aws.amazon.com/SAML/Attributes/Role':
+                for val in attribute.findall('{urn:oasis:names:tc:SAML:2.0:assertion}AttributeValue'):
+                    provider_arn, role_arn = val.text.split(',')
+                    roles.append((provider_arn, role_arn))
 
-    if not roles:
-        error('NO VALID ROLE FOUND')
-        return
-    ok()
+        if not roles:
+            act.error('NO VALID ROLE FOUND')
+            return
 
     if len(roles) == 1:
         provider_arn, role_arn = roles[0]
@@ -1328,22 +1299,21 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
         provider_arn, role_arn = choice('Multiple roles found, please select one.',
                                         [(r, get_role_label(r)) for r in roles])
 
-    action('Assuming role "{role_label}"..', role_label=get_role_label((provider_arn, role_arn)))
-    saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
+    with Action('Assuming role "{role_label}"..', role_label=get_role_label((provider_arn, role_arn))):
+        saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
-    session = botocore.session.get_session()
-    sts = session.get_service('sts')
-    operation = sts.get_operation('AssumeRoleWithSAML')
+        session = botocore.session.get_session()
+        sts = session.get_service('sts')
+        operation = sts.get_operation('AssumeRoleWithSAML')
 
-    endpoint = sts.get_endpoint(region)
-    endpoint._signature_version = None
-    http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn,
-                                                  SAMLAssertion=saml_assertion)
+        endpoint = sts.get_endpoint(region)
+        endpoint._signature_version = None
+        http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn,
+                                                      SAMLAssertion=saml_assertion)
 
-    key_id = response_data['Credentials']['AccessKeyId']
-    secret = response_data['Credentials']['SecretAccessKey']
-    session_token = response_data['Credentials']['SessionToken']
-    ok()
+        key_id = response_data['Credentials']['AccessKeyId']
+        secret = response_data['Credentials']['SecretAccessKey']
+        session_token = response_data['Credentials']['SessionToken']
 
     if print_env_vars:
         # different AWS SDKs expect either AWS_SESSION_TOKEN or AWS_SECURITY_TOKEN, so set both
@@ -1358,9 +1328,8 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
                                                      'file with the new temporary access key?', default=True)
 
     if proceed:
-        action('Writing temporary AWS credentials..')
-        write_aws_credentials(key_id, secret, session_token)
-        ok()
+        with Action('Writing temporary AWS credentials..'):
+            write_aws_credentials(key_id, secret, session_token)
 
 
 @cli.command()
