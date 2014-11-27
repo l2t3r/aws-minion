@@ -1201,6 +1201,9 @@ def send_request_to_loggly(ctx, request: str):
 @click.argument('size', default=50)
 @click.pass_context
 def show_version_logs(ctx, application_name: str, application_version, start, until, size):
+    """
+    Show logs of one specific application version
+    """
     app_config = ctx.obj.config
     app_identifier = '{}-{}'.format(application_name, application_version)
     account = app_config['loggly_account']
