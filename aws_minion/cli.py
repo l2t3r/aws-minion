@@ -29,7 +29,6 @@ import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 
-
 from aws_minion.console import print_table, action, ok, error, warning, choice
 from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.utils import FloatRange
@@ -60,6 +59,10 @@ HEALTH_CHECK_INTERVAL_IN_S = 20
 UNHEALTHY_THRESHOLD = 5
 EXTRA_WAIT_TIME = 180
 SLEEP_TIME_IN_S = 5
+
+LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
+                                 '?q=syslog.appName:{app_identifier}&from={start}&until={until}&order=asc'
+LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/events?rsid={rsid}'
 
 
 def validate_application_name(ctx, param, value):
@@ -231,7 +234,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
                                        default=param_value,
                                        hide_input=hide_input,
                                        show_default=show_default).strip()
-            if abort and not param_value:
+            if abort and param_value is None:
                 raise click.Abort('{} should be provided'.format(msg))
 
         data[name] = param_value
@@ -833,52 +836,17 @@ def is_docker_image_valid(docker_image: str):
         return False
 
 
-def get_instance_by_group_and_status(conn, group_name: str, status: str):
+def print_remote_file(instance, application, remote_file_path: str):
     """
-    Determines EC2 instance with tag:Name == group_name and specified status
-    """
-    instances = conn.get_only_instances(filters={'tag:Name': group_name})
-    if len(instances) == 0:
-        error('could not find any instance with tag:Name : {}'.format(group_name))
-        return None
-
-    for instance in instances:
-        if instance.state == 'running':
-            return instance
-
-    return None
-
-
-def get_key_file_path_by_app_name(app_name: str):
-    """
-    Constructs the path to the application's (or rather to the instances running the application)
-    SSH key file which was created in `configure`
-    """
-    key_name = 'app-{}'.format(app_name)
-    key_dir = os.path.expanduser('~/.ssh')
-    return os.path.join(key_dir, '%s.pem' % key_name)
-
-
-def print_cloud_init_log(conn, application_name: str, group_name: str):
-    """
-    Prints out /var/log/cloud-init-output.log of a running instance.
-    Note: this function is intended to be called by `create_version(..)`
-          where only one running instance is created initially
+    Prints out the given file located on the specified instance.
 
     parameters:
 
-    conn:             boto region connection
-    application_name: name of the application e.g. 'logmeister'
-    group_name:       name of the application combined with version e.g. 'app-logmeister-0.4'
-                      Note: group_name has to correspond to instance's tag:Name
+    instance:         target EC2 instance
+    application:      coressponding application instance
+    remote_file_path: path of the target file on the EC2 instance
     """
-
-    instance = get_instance_by_group_and_status(conn, group_name, 'running')
-    if instance is None:
-        error('could not find any active instance')
-        return
-
-    key_file = get_key_file_path_by_app_name(application_name)
+    key_file = application.get_key_file_path()
     if not os.path.exists(key_file):
         error('could not find ssh key file {}'.format(key_file))
         return
@@ -887,12 +855,14 @@ def print_cloud_init_log(conn, application_name: str, group_name: str):
                                          ssh_key_file=key_file,
                                          user_name='ubuntu')
 
-    status, stdout, stderr = ssh_client.run('cat /var/log/cloud-init-output.log')
+    remote_file_path = shlex.quote(remote_file_path)
+    status, stdout, stderr = ssh_client.run('cat {}'.format(remote_file_path))
     if status == 0:
-        print('see cloud-init log for analysis:')
-        print(codecs.decode(stdout, "unicode_escape"))
+        click.echo('see cloud-init log for analysis:')
+        click.echo(codecs.decode(stdout, "unicode_escape"))
     else:
-        error('could fetch cloud-init log')
+        error('could not output file "{}" on instance {} [status={}, error_msg={}]'
+              .format(remote_file_path, instance.name, status, stderr))
 
 
 @versions.command('create')
@@ -916,7 +886,6 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
 
-    conn = boto.ec2.connect_to_region(region)
     app = ctx.obj.get_application(application_name)
     sg, manifest = app.security_group, app.manifest
 
@@ -1063,8 +1032,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         error('ABORTED. Default health check time to wait for members to become active has been exceeded.' +
               ' There might be a problem with your application')
 
-        print('trying to retrieve information for analysis...')
-        print_cloud_init_log(conn, application_name, group_name)
+        action('Trying to retrieve information for analysis...')
+        instances = ctx.obj.get_instances_by_app_identifier_and_state(group_name, 'running')
+        if not instances:
+            error('Could not find any running instance for group {}'.format(group_name))
+        else:
+            instance = instances[0]  # there can only be one
+            print_remote_file(instance, app, '/var/log/cloud-init-output.log')
+            ok()
     else:
         ok()
 
@@ -1194,6 +1169,71 @@ def delete(ctx, application_name: str):
     lb_sg = ctx.obj.get_security_group(lb_sg_name)
     lb_sg.delete()
     ok()
+
+
+def send_request_to_loggly(ctx, request: str):
+    app_config = ctx.obj.config
+
+    if 'loggly_user' not in app_config:
+        error('No Loggly credentials configured. Please set them via `app configure`')
+
+    response = requests.get(request, auth=(app_config['loggly_user'], app_config['loggly_password']))
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        error('Request "{}" failed with status code {}'.format(request, response.status_code))
+        return None
+
+
+@versions.command('logs')
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
+@click.argument('start', default='-24h')
+@click.argument('until', default='now')
+@click.argument('size', default=50)
+@click.pass_context
+def show_version_logs(ctx, application_name: str, application_version, start, until, size):
+    app_config = ctx.obj.config
+    app_identifier = '{}-{}'.format(application_name, application_version)
+    account = app_config['loggly_account']
+
+    # request search and obtain rsid
+    request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=account,
+                                                    app_identifier=app_identifier,
+                                                    start=start,
+                                                    until=until)
+    response_in_json = send_request_to_loggly(ctx, request)
+    if not response_in_json:
+        return
+
+    rsid = response_in_json['rsid']['id']
+
+    # obtain log data fetched by foregoing search request
+    request = LOGGLY_EVENTS_REQUEST_TEMPLATE.format(account=account, rsid=rsid)
+    response_in_json = send_request_to_loggly(ctx, request)
+    if not response_in_json:
+        return
+
+    # output log data
+    for event in response_in_json['events']:
+        click.echo(event['event']['json']['log'], nl=False)
+
+
+@instances.command('logs')
+@click.argument('instance-id')
+@click.argument('remote-file-path')
+@click.pass_context
+def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
+    instance = ctx.obj.get_instance_by_id(instance_id)
+    if instance is None:
+        error('Could not find instance with id "{}"'.format(instance_id))
+        return
+
+    app_name = instance.key_name.replace('app-', '', 1)
+    app = ctx.obj.get_application(app_name)
+
+    print_remote_file(instance, app, remote_file_path)
 
 
 def get_saml_response(html):
