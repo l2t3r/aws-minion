@@ -63,7 +63,8 @@ SLEEP_TIME_IN_S = 5
 LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
                                  '?q=syslog.appName:{app_identifier}&from={start}&until={until}&size={size}&order=asc'
 LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/events?rsid={rsid}'
-LOGGLY_REQUEST_START_TIME = '-5m'
+LOGGLY_TAIL_START_TIME = '-5m'
+LOGGLY_REQUEST_SIZE = 10000
 
 
 def validate_application_name(ctx, param, value):
@@ -1203,9 +1204,9 @@ def request_loggly_logs(ctx, account: str, app_identifier: str, start: str, unti
 @versions.command('logs')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
-@click.argument('start', default='-24h')
+@click.argument('start', default='-1h')
 @click.argument('until', default='now')
-@click.argument('size', default=50)
+@click.argument('size', default=LOGGLY_REQUEST_SIZE)
 @click.pass_context
 def show_version_logs(ctx, application_name: str, application_version, start, until, size):
     app_config = ctx.obj.config
@@ -1366,8 +1367,8 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
 @versions.command('tail')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
-@click.argument('start', default=LOGGLY_REQUEST_START_TIME)
-@click.argument('log-request-size', default=10000)
+@click.argument('start', default=LOGGLY_TAIL_START_TIME)
+@click.argument('log-request-size', default=LOGGLY_REQUEST_SIZE)
 @click.pass_context
 def tail_version_logs(ctx, application_name: str, application_version, start, log_request_size):
     app_config = ctx.obj.config
@@ -1381,7 +1382,7 @@ def tail_version_logs(ctx, application_name: str, application_version, start, lo
 
         # Given start time might be far in the past. All following requests do not need
         # to be that far in the past
-        start = LOGGLY_REQUEST_START_TIME
+        start = LOGGLY_TAIL_START_TIME
 
         for event in response_in_json['events']:
             timestamp = event['timestamp']
@@ -1395,8 +1396,11 @@ def tail_version_logs(ctx, application_name: str, application_version, start, lo
             else:
                 break
 
-            # click.echo(event_id + ' ' +  str(timestamp) + ' - ', nl=False)
-            click.echo(event['event']['json']['log'], nl=False)
+            event_data = event['event']
+            if 'json' in  event_data:
+                event_data = event_data['json']
+                if 'log' in event_data:
+                    click.echo(event_data['log'], nl=False)
 
         time.sleep(1)
 
