@@ -84,8 +84,9 @@ Building HTML documentation locally:
 ToDos
 =====
 
-* use SSL for ELB
 * use private and public subnets
+* fix hardcoded AMI ID
+* create new base AMI
 
 
 .. _AWS Minion Documentation on Read the Docs: http://aws-minion.readthedocs.org/

@@ -17,6 +17,7 @@ class ApplicationNotFound(Exception):
         return 'Application "{}" does not exist'.format(self.application_name)
 
 
+@functools.total_ordering
 class Application:
 
     def __init__(self, name: str, security_group):
@@ -35,6 +36,12 @@ class Application:
         """
         key_dir = os.path.expanduser('~/.ssh')
         return os.path.join(key_dir, '{}.pem'.format(self.identifier))
+
+    def __lt__(self, other):
+        return self.name < other.name
+
+    def __eq__(self, other):
+        return self.name == other.name
 
 
 @functools.total_ordering
@@ -106,12 +113,26 @@ class Context:
     def domain(self):
         return self.config['domain']
 
+    @property
+    def saml_identity_provider_url(self):
+        return self.config.get('saml_identity_provider_url')
+
     def get_application(self, application_name: str) -> Application:
         security_group = self.get_security_group(IDENTIFIER_PREFIX + application_name)
         if not security_group:
             raise ApplicationNotFound(application_name)
         app = Application(application_name, security_group)
         return app
+
+    def get_applications(self) -> list:
+        conn = boto.ec2.connect_to_region(self.region)
+
+        rows = []
+        all_security_groups = conn.get_all_security_groups()
+        for _sg in all_security_groups:
+            if _sg.name.startswith(IDENTIFIER_PREFIX) and _sg.vpc_id == self.vpc and not _sg.name.endswith('-lb'):
+                rows.append(Application(_sg.name[len(IDENTIFIER_PREFIX):], _sg))
+        return []
 
     def get_versions(self, application_name: str=None, application_version: str=None) -> [ApplicationVersion]:
         """

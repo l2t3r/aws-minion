@@ -106,3 +106,24 @@ def print_table(cols, rows):
             click.secho(('{:' + align + str(colwidths[col]) + '}').format(val), nl=False, **style)
             click.echo(' ', nl=False)
         click.echo('')
+
+
+def choice(prompt, options):
+    click.secho(prompt)
+    for i, option in enumerate(options):
+        if isinstance(option, tuple):
+            value, label = option
+        else:
+            value = label = option
+        click.secho('{}) {}'.format(i+1, label))
+    while True:
+        selection = click.prompt('Please select (1-{})'.format(len(options)), type=int)
+        try:
+            result = options[int(selection)-1]
+            if isinstance(result, tuple):
+                value, label = result
+            else:
+                value = result
+            return value
+        except:
+            pass

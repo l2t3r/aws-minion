@@ -8,27 +8,32 @@ import random
 import time
 import datetime
 import re
+from xml.etree import ElementTree
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
 import boto.ec2.autoscale
 import boto.iam
 import boto.route53
+import boto.sts
 from boto.ec2.autoscale import LaunchConfiguration
 from boto.ec2.autoscale import AutoScalingGroup
 import boto.manage.cmdshell
 from boto.ec2.elb import HealthCheck
+import botocore.session
+from bs4 import BeautifulSoup
 import click
+import keyring
+import requests
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
-import requests
 
-# Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
-from aws_minion.console import print_table, action, ok, error, warning
+from aws_minion.console import print_table, action, ok, error, warning, choice
 from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.utils import FloatRange
 
+# FIXME: hardcoded for eu-west-1: Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 AMI_ID = 'ami-f0b11187'
 
 CONFIG_DIR_PATH = click.get_app_dir('aws-minion')
@@ -52,6 +57,7 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 HEALTH_CHECK_TIMEOUT_IN_S = 5
 HEALTH_CHECK_INTERVAL_IN_S = 20
 UNHEALTHY_THRESHOLD = 5
+EXTRA_WAIT_TIME = 180
 SLEEP_TIME_IN_S = 5
 
 LOGGLY_ACCOUNT = 'zalando'
@@ -151,22 +157,29 @@ def cli(ctx, config_file):
     ctx.obj = Context(data)
 
 
+def write_aws_credentials(key_id, secret, session_token=None):
+    credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
+    os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
+    credentials_content = dedent('''\
+            [default]
+            aws_access_key_id     = {key_id}
+            aws_secret_access_key = {secret}
+            ''').format(key_id=key_id, secret=secret)
+    if session_token:
+        # apparently the different AWS SDKs either use "session_token" or "security_token", so set both
+        credentials_content += 'aws_session_token = {}\n'.format(session_token)
+        credentials_content += 'aws_security_token = {}\n'.format(session_token)
+    with open(credentials_path, 'w') as fd:
+        fd.write(credentials_content)
+
+
 def ensure_aws_credentials():
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
         click.secho('AWS credentials file not found, please provide them now')
         key_id = click.prompt('AWS Access Key ID')
         secret = click.prompt('AWS Secret Access Key', hide_input=True)
-
-        os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
-
-        credentials_content = dedent('''\
-            [default]
-            aws_access_key_id     = {key_id}
-            aws_secret_access_key = {secret}
-            ''').format(key_id=key_id, secret=secret)
-        with open(credentials_path, 'w') as fd:
-            fd.write(credentials_content)
+        write_aws_credentials(key_id, secret)
 
 
 @cli.command()
@@ -259,6 +272,9 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     if not domain and not data.get('domain'):
         action('Trying to autodetect DNS domain..')
         dns_conn = boto.route53.connect_to_region(region)
+        if not dns_conn:
+            error('CONNECTION FAILED')
+            return
         zones = dns_conn.get_zones()
         if len(zones) == 1:
             data['domain'] = zones[0].name.rstrip('.')
@@ -304,19 +320,10 @@ def applications(ctx):
     Manage applications, list all apps
     """
     if not ctx.invoked_subcommand:
-        # list apps
-        region = ctx.obj.region
-        vpc = ctx.obj.vpc
-
-        conn = boto.ec2.connect_to_region(region)
-
         rows = []
-        all_security_groups = conn.get_all_security_groups()
-        for _sg in all_security_groups:
-            if _sg.name.startswith('app-') and _sg.vpc_id == vpc and not _sg.name.endswith('-lb'):
-                manifest = yaml.safe_load(_sg.tags['Manifest'])
-                rows.append({k: str(v) for k, v in manifest.items()})
-        rows.sort(key=lambda x: (x['application_name']))
+        for app in ctx.obj.get_applications():
+            rows.append({k: str(v) for k, v in app.manifest.items()})
+        rows.sort()
         print_table('application_name team_name exposed_ports stateful'.split(), rows)
 
 
@@ -476,7 +483,7 @@ def compensate(calculation_error, compensations, identifier, new_record_weights,
 
 
 def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr):
-    action('Setting weights..')
+    action('Setting weights for {dns_name}..', **vars())
     did_the_upsert = False
     for r in rr:
         if r.type == 'CNAME' and r.name == dns_name:
@@ -520,13 +527,13 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     lb = version.get_load_balancer()
     rr = zone.get_records()
     known_record_weights, partial_count, partial_sum = get_weights(dns_name, identifier, rr)
+    action('Calculating new weights..')
     compensations = {}
     if partial_count:
         delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
     else:
         delta = 0
         compensations[identifier] = FULL_PERCENTAGE - percentage
-        warning("Setting full percentage for the only available version")
         percentage = int(FULL_PERCENTAGE)
     new_record_weights = calculate_new_weights(delta, identifier, known_record_weights, percentage)
     total_weight = sum(new_record_weights.values())
@@ -535,6 +542,7 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     if calculation_error:
         forced_delta, percentage = compensate(calculation_error, compensations, identifier,
                                               new_record_weights, partial_count, percentage, identifier_versions)
+    ok()
     rows = [
         {
             'application_name': application_name,
@@ -901,7 +909,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     # Docker
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker rsyslog-gnutls
 
-    containerId=$(docker run -d {env_options} -p {exposed_port}:{exposed_port} {docker_image})
+    containerId=$(docker run -d {env_options} --net=host {docker_image})
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
@@ -1004,7 +1012,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     # calculate max number of iterations corresponding to the max time range after which AWS declares
     # a member as 'OutOfService'
-    max_wait_time = UNHEALTHY_THRESHOLD * (HEALTH_CHECK_TIMEOUT_IN_S + HEALTH_CHECK_INTERVAL_IN_S)
+    max_wait_time = EXTRA_WAIT_TIME + UNHEALTHY_THRESHOLD * (HEALTH_CHECK_TIMEOUT_IN_S + HEALTH_CHECK_INTERVAL_IN_S)
     max_iterations = (max_wait_time / SLEEP_TIME_IN_S) + 1
 
     j = 0
@@ -1219,6 +1227,134 @@ def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
     app = ctx.obj.get_application(app_name)
 
     print_remote_file(instance, app, remote_file_path)
+
+
+def get_saml_response(html):
+    """
+    Parse SAMLResponse from Shibboleth page
+
+    >>> get_saml_response('<input name="a"/>')
+
+    >>> get_saml_response('<body xmlns="bla"><form><input name="SAMLResponse" value="eG1s"/></form></body>')
+    'xml'
+    """
+    soup = BeautifulSoup(html)
+
+    for elem in soup.find_all('input', attrs={'name': 'SAMLResponse'}):
+        saml_base64 = elem.get('value')
+        xml = codecs.decode(saml_base64.encode('ascii'), 'base64').decode('utf-8')
+        return xml
+
+
+def get_role_label(role):
+    """
+    >>> get_role_label(('arn:aws:iam::123:saml-provider/Shibboleth', 'arn:aws:iam::123:role/Shibboleth-PowerUser'))
+    'Shibboleth-PowerUser'
+    """
+    provider_arn, role_arn = role
+    return role_arn.split('/')[-1]
+
+
+@cli.command()
+@click.option('--url', '-u', help='SAML identity provider URL')
+@click.option('--user', '-U', prompt='Username')
+@click.option('--password', '-p', help='Password')
+@click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
+@click.option('--overwrite-credentials', help='Always overwrite AWS credentials file', is_flag=True)
+@click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
+@click.pass_context
+def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars):
+    """
+    Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
+    """
+    url = url or ctx.obj.saml_identity_provider_url
+
+    if not url:
+        raise click.UsageError('Please specify SAML identity provider URL in config file or use "--url"')
+
+    session = requests.Session()
+    response = session.get(url)
+
+    keyring_key = 'aws-minion.saml'
+    password = password or keyring.get_password(keyring_key, user)
+    if not password:
+        password = click.prompt('Password', hide_input=True)
+
+    action('Authenticating against {url}..', **vars())
+
+    # NOTE: parameters are hardcoded for Shibboleth IDP
+    data = {'j_username': user, 'j_password': password, 'submit': 'Login'}
+    response2 = session.post(response.url, data=data)
+    saml_xml = get_saml_response(response2.text)
+    if not saml_xml:
+        error('LOGIN FAILED')
+        return
+    ok()
+
+    keyring.set_password(keyring_key, user, password)
+
+    action('Checking SAML roles..')
+    tree = ElementTree.fromstring(saml_xml)
+
+    assertion = tree.find('{urn:oasis:names:tc:SAML:2.0:assertion}Assertion')
+
+    roles = []
+    for attribute in assertion.findall('.//{urn:oasis:names:tc:SAML:2.0:assertion}Attribute[@Name]'):
+        if attribute.attrib['Name'] == 'https://aws.amazon.com/SAML/Attributes/Role':
+            for val in attribute.findall('{urn:oasis:names:tc:SAML:2.0:assertion}AttributeValue'):
+                provider_arn, role_arn = val.text.split(',')
+                roles.append((provider_arn, role_arn))
+
+    if not roles:
+        error('NO VALID ROLE FOUND')
+        return
+    ok()
+
+    if len(roles) == 1:
+        provider_arn, role_arn = roles[0]
+    elif role:
+        matching_roles = [_role for _role in roles if role in str(_role)]
+        if not matching_roles or len(matching_roles) > 1:
+            raise click.UsageError('Given role (--role) was not found or not unique')
+        provider_arn, role_arn = matching_roles[0]
+    else:
+        roles.sort()
+        provider_arn, role_arn = choice('Multiple roles found, please select one.',
+                                        [(r, get_role_label(r)) for r in roles])
+
+    action('Assuming role {role_label}..', role_label=get_role_label((provider_arn, role_arn)))
+    saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
+
+    session = botocore.session.get_session()
+    sts = session.get_service('sts')
+    operation = sts.get_operation('AssumeRoleWithSAML')
+
+    endpoint = sts.get_endpoint(ctx.obj.region)
+    endpoint._signature_version = None
+    http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn,
+                                                  SAMLAssertion=saml_assertion)
+
+    key_id = response_data['Credentials']['AccessKeyId']
+    secret = response_data['Credentials']['SecretAccessKey']
+    session_token = response_data['Credentials']['SessionToken']
+    ok()
+
+    if print_env_vars:
+        # different AWS SDKs expect either AWS_SESSION_TOKEN or AWS_SECURITY_TOKEN, so set both
+        click.secho(dedent('''\
+        # environment variables with temporary AWS credentials:
+        export AWS_ACCESS_KEY_ID="{key_id}"
+        export AWS_SECRET_ACCESS_KEY="{secret}"
+        export AWS_SESSION_TOKEN="{session_token}")
+        export AWS_SECURITY_TOKEN="{session_token}"''').format(**vars()), fg='blue')
+
+    proceed = overwrite_credentials or click.confirm('Do you want to overwrite your AWS credentials ' +
+                                                     'file with the new temporary access key?', default=True)
+
+    if proceed:
+        action('Writing temporary AWS credentials..')
+        write_aws_credentials(key_id, secret, session_token)
+        ok()
 
 
 def main():
