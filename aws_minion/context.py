@@ -132,7 +132,7 @@ class Context:
         for _sg in all_security_groups:
             if _sg.name.startswith(IDENTIFIER_PREFIX) and _sg.vpc_id == self.vpc and not _sg.name.endswith('-lb'):
                 rows.append(Application(_sg.name[len(IDENTIFIER_PREFIX):], _sg))
-        return []
+        return rows
 
     def get_versions(self, application_name: str=None, application_version: str=None) -> [ApplicationVersion]:
         """
