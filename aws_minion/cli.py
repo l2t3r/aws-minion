@@ -60,7 +60,6 @@ UNHEALTHY_THRESHOLD = 5
 EXTRA_WAIT_TIME = 180
 SLEEP_TIME_IN_S = 5
 
-LOGGLY_ACCOUNT = 'zalando'
 LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
                                  '?q=syslog.appName:{app_identifier}&from={start}&until={until}&order=asc'
 LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://zalando.loggly.com/apiv2/events?rsid={}'
@@ -1189,10 +1188,11 @@ def send_request_to_loggly(ctx, request: str):
 @click.argument('size', default=50)
 @click.pass_context
 def show_version_logs(ctx, application_name: str, application_version, start, until, size):
+    app_config = ctx.obj.config
     app_identifier = '{}-{}'.format(application_name, application_version)
 
     # request search and obtain rsid
-    request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=LOGGLY_ACCOUNT,
+    request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=app_config['loggly_account'],
                                                     app_identifier=app_identifier,
                                                     start=start,
                                                     until=until)
