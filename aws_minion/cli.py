@@ -30,7 +30,7 @@ from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 
 
-from aws_minion.console import print_table, action, ok, error, warning
+from aws_minion.console import print_table, action, ok, error, warning, choice
 from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.utils import FloatRange
 
@@ -1207,12 +1207,24 @@ def get_saml_response(html):
         return xml
 
 
+def get_role_label(role):
+    """
+    >>> get_role_label(('arn:aws:iam::123:saml-provider/Shibboleth', 'arn:aws:iam::123:role/Shibboleth-PowerUser'))
+    'Shibboleth-PowerUser'
+    """
+    provider_arn, role_arn = role
+    return role_arn.split('/')[-1]
+
+
 @cli.command()
 @click.option('--url', '-u', help='SAML identity provider URL')
 @click.option('--user', '-U', prompt='Username')
 @click.option('--password', '-p', help='Password')
+@click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
+@click.option('--overwrite-credentials', help='Always overwrite AWS credentials file', is_flag=True)
+@click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
 @click.pass_context
-def login(ctx, url, user, password):
+def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars):
     """
     Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
     """
@@ -1225,7 +1237,7 @@ def login(ctx, url, user, password):
     response = session.get(url)
 
     keyring_key = 'aws-minion.saml'
-    password = keyring.get_password(keyring_key, user)
+    password = password or keyring.get_password(keyring_key, user)
     if not password:
         password = click.prompt('Password', hide_input=True)
 
@@ -1261,15 +1273,17 @@ def login(ctx, url, user, password):
 
     if len(roles) == 1:
         provider_arn, role_arn = roles[0]
+    elif role:
+        matching_roles = [_role for _role in roles if role in str(_role)]
+        if not matching_roles or len(matching_roles) > 1:
+            raise click.UsageError('Given role (--role) was not found or not unique')
+        provider_arn, role_arn = matching_roles[0]
     else:
-        click.secho('Multiple roles found, please select..')
-        i = 1
-        for _, role_arn in sorted(roles):
-            click.secho('{}) {}'.format(i, role_arn))
-            i += 1
-        index = int(click.prompt('Select'))
-        provider_arn, role_arn = roles[index-1]
+        roles.sort()
+        provider_arn, role_arn = choice('Multiple roles found, please select one.',
+                                        [(r, get_role_label(r)) for r in roles])
 
+    action('Assuming role {role_label}..', role_label=get_role_label((provider_arn, role_arn)))
     saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
     session = botocore.session.get_session()
@@ -1284,17 +1298,19 @@ def login(ctx, url, user, password):
     key_id = response_data['Credentials']['AccessKeyId']
     secret = response_data['Credentials']['SecretAccessKey']
     session_token = response_data['Credentials']['SessionToken']
+    ok()
 
-    # different AWS SDKs expect either AWS_SESSION_TOKEN or AWS_SECURITY_TOKEN, so set both
-    click.secho(dedent('''\
-    # environment variables with temporary AWS credentials:
-    export AWS_ACCESS_KEY_ID="{key_id}"
-    export AWS_SECRET_ACCESS_KEY="{secret}"
-    export AWS_SESSION_TOKEN="{session_token}")
-    export AWS_SECURITY_TOKEN="{session_token}"''').format(**vars()), fg='blue')
+    if print_env_vars:
+        # different AWS SDKs expect either AWS_SESSION_TOKEN or AWS_SECURITY_TOKEN, so set both
+        click.secho(dedent('''\
+        # environment variables with temporary AWS credentials:
+        export AWS_ACCESS_KEY_ID="{key_id}"
+        export AWS_SECRET_ACCESS_KEY="{secret}"
+        export AWS_SESSION_TOKEN="{session_token}")
+        export AWS_SECURITY_TOKEN="{session_token}"''').format(**vars()), fg='blue')
 
-    proceed = click.confirm('Do you want to overwrite your AWS credentials file with the new temporary access key?',
-                            default=True)
+    proceed = overwrite_credentials or click.confirm('Do you want to overwrite your AWS credentials ' +
+                                                     'file with the new temporary access key?', default=True)
 
     if proceed:
         action('Writing temporary AWS credentials..')
