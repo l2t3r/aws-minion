@@ -5,8 +5,12 @@
     Setup file for aws-minion.
 """
 
-import os
 import sys
+if sys.version_info < (3, 4, 0):
+    sys.stderr.write('FATAL: AWS Minion needs to be run with Python 3.4+\n')
+    sys.exit(1)
+
+import os
 import inspect
 from distutils.cmd import Command
 

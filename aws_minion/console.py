@@ -36,6 +36,32 @@ def warning(msg, **kwargs):
     click.secho(' {}'.format(msg), fg='yellow', bold=True, **kwargs)
 
 
+class Action:
+
+    def __init__(self, msg, **kwargs):
+        self.msg = msg
+        self.msg_args = kwargs
+        self.errors = []
+
+    def __enter__(self):
+        action(self.msg, **self.msg_args)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            if not self.errors:
+                ok()
+        else:
+            error('EXCEPTION OCCURRED: {}'.format(exc_val))
+
+    def error(self, msg, **kwargs):
+        error(msg, **kwargs)
+        self.errors.append(msg)
+
+    def progress(self):
+        click.secho(' .', nl=False)
+
+
 def format_time(ts):
     if ts == 0:
         return ''

@@ -17,6 +17,8 @@ See the `AWS Minion Documentation on Read the Docs`_.
    :target: http://aws-minion.readthedocs.org/en/latest/concepts.html
    :alt: Application Stack
 
+AWS Minion requires Python 3.4+ and was only tested on Ubuntu 14.04 and Mac OS X.
+
 Installing
 ==========
 
