@@ -830,7 +830,7 @@ def print_remote_file(instance, application, remote_file_path: str):
     parameters:
 
     instance:         target EC2 instance
-    application:      coressponding application instance 
+    application:      coressponding application instance
     remote_file_path: path of the target file on the EC2 instance
     """
     key_file = application.get_key_file_path()
@@ -1173,14 +1173,14 @@ def send_request_to_loggly(ctx, request: str):
         return None
 
 
-@versions.command('log')
+@versions.command('logs')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
 @click.argument('start', default='-24h')
 @click.argument('until', default='now')
 @click.argument('size', default=50)
 @click.pass_context
-def log(ctx, application_name: str, application_version, start, until, size):
+def show_version_logs(ctx, application_name: str, application_version, start, until, size):
     app_identifier = '{}-{}'.format(application_name, application_version)
 
     # request search and obtain rsid
@@ -1205,20 +1205,19 @@ def log(ctx, application_name: str, application_version, start, until, size):
         click.echo(event['event']['json']['log'], nl=False)
 
 
-
-
-@applications.command()
-@click.argument('application-name')
+@instances.command('logs')
 @click.argument('instance-id')
 @click.argument('remote-file-path')
 @click.pass_context
-def rcat(ctx, application_name: str, instance_id: str, remote_file_path: str):
-    # def print_remote_file(instance, application, remote_file_path: str):
-    app = ctx.obj.get_application(application_name)
+def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
     instance = ctx.obj.get_instance_by_id(instance_id)
     if instance is None:
         error('Could not find instance with id "{}"'.format(instance_id))
         return
+
+    app_name = instance.key_name.replace('app-', '', 1)
+    app = ctx.obj.get_application(app_name)
+
     print_remote_file(instance, app, remote_file_path)
 
 
