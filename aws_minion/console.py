@@ -117,7 +117,7 @@ def choice(prompt, options):
             value = label = option
         click.secho('{}) {}'.format(i+1, label))
     while True:
-        selection = click.prompt('Please select (1-{})'.format(len(options)))
+        selection = click.prompt('Please select (1-{})'.format(len(options)), type=int)
         try:
             result = options[int(selection)-1]
             if isinstance(result, tuple):
