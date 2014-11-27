@@ -172,13 +172,13 @@ def write_aws_credentials(key_id, secret, session_token=None):
         fd.write(credentials_content)
 
 
-def ensure_aws_credentials():
+def ensure_aws_credentials(region):
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
         options = ['Use existing AWS Access Key', 'Perform SAML login']
         selection = choice('AWS credentials file not found. Use existing access key or SAML login?', options)
         if 'SAML' in selection:
-            region = click.prompt('AWS Region ID (e.g "eu-west-1")')
+            region = region or click.prompt('AWS Region ID (e.g "eu-west-1")')
             url = click.prompt('SAML Identity Provider URL')
             user = click.prompt('SAML Username')
             saml_login(region, url, user, overwrite_credentials=True)
@@ -186,6 +186,7 @@ def ensure_aws_credentials():
             key_id = click.prompt('AWS Access Key ID')
             secret = click.prompt('AWS Secret Access Key', hide_input=True)
             write_aws_credentials(key_id, secret)
+    return region
 
 
 @cli.command()
@@ -203,7 +204,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     """
     Configure the AWS and Loggly connection settings
     """
-    ensure_aws_credentials()
+    region = ensure_aws_credentials(region)
 
     # load config file
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
@@ -269,9 +270,13 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     vpc = ask('AWS VPC ID', 'vpc', suggestion='vpc-abcd1234', callback=validate_vpc_id)
 
     action('Checking VPC {vpc}..', **vars())
-    subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
+    try:
+        subnets = vpc_conn.get_all_vpcs(vpc_ids=[vpc])
+    except:
+        error('VPC NOT FOUND')
+        return
     if not subnets:
-        error('FAILED')
+        error('NO SUBNETS')
         return
     ok()
 
@@ -292,7 +297,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     dns_conn = boto.route53.connect_to_region(region)
     zone = dns_conn.get_zone(domain + '.')
     if not zone:
-        error('FAILED')
+        error('ZONE NOT FOUND')
         return
     ok()
 
@@ -1266,10 +1271,10 @@ def get_saml_response(html):
 def get_role_label(role):
     """
     >>> get_role_label(('arn:aws:iam::123:saml-provider/Shibboleth', 'arn:aws:iam::123:role/Shibboleth-PowerUser'))
-    'Shibboleth-PowerUser'
+    'AWS Account 123: Shibboleth-PowerUser'
     """
     provider_arn, role_arn = role
-    return role_arn.split('/')[-1]
+    return 'AWS Account {}: {}'.format(role_arn.split(':')[4], role_arn.split('/')[-1])
 
 
 def saml_login(region, url, user, password=None, role=None, overwrite_credentials=False, print_env_vars=False):
@@ -1323,7 +1328,7 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
         provider_arn, role_arn = choice('Multiple roles found, please select one.',
                                         [(r, get_role_label(r)) for r in roles])
 
-    action('Assuming role {role_label}..', role_label=get_role_label((provider_arn, role_arn)))
+    action('Assuming role "{role_label}"..', role_label=get_role_label((provider_arn, role_arn)))
     saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
     session = botocore.session.get_session()
