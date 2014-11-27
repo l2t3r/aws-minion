@@ -175,10 +175,17 @@ def write_aws_credentials(key_id, secret, session_token=None):
 def ensure_aws_credentials():
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
-        click.secho('AWS credentials file not found, please provide them now')
-        key_id = click.prompt('AWS Access Key ID')
-        secret = click.prompt('AWS Secret Access Key', hide_input=True)
-        write_aws_credentials(key_id, secret)
+        options = ['Use existing AWS Access Key', 'Perform SAML login']
+        selection = choice('AWS credentials file not found. Use existing access key or SAML login?', options)
+        if 'SAML' in selection:
+            region = click.prompt('AWS Region ID (e.g "eu-west-1")')
+            url = click.prompt('SAML Identity Provider URL')
+            user = click.prompt('SAML Username')
+            saml_login(region, url, user, overwrite_credentials=True)
+        else:
+            key_id = click.prompt('AWS Access Key ID')
+            secret = click.prompt('AWS Secret Access Key', hide_input=True)
+            write_aws_credentials(key_id, secret)
 
 
 @cli.command()
@@ -1262,23 +1269,7 @@ def get_role_label(role):
     return role_arn.split('/')[-1]
 
 
-@cli.command()
-@click.option('--url', '-u', help='SAML identity provider URL')
-@click.option('--user', '-U', prompt='Username')
-@click.option('--password', '-p', help='Password')
-@click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
-@click.option('--overwrite-credentials', help='Always overwrite AWS credentials file', is_flag=True)
-@click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
-@click.pass_context
-def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars):
-    """
-    Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
-    """
-    url = url or ctx.obj.saml_identity_provider_url
-
-    if not url:
-        raise click.UsageError('Please specify SAML identity provider URL in config file or use "--url"')
-
+def saml_login(region, url, user, password=None, role=None, overwrite_credentials=False, print_env_vars=False):
     session = requests.Session()
     response = session.get(url)
 
@@ -1336,7 +1327,7 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
     sts = session.get_service('sts')
     operation = sts.get_operation('AssumeRoleWithSAML')
 
-    endpoint = sts.get_endpoint(ctx.obj.region)
+    endpoint = sts.get_endpoint(region)
     endpoint._signature_version = None
     http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn,
                                                   SAMLAssertion=saml_assertion)
@@ -1362,6 +1353,26 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
         action('Writing temporary AWS credentials..')
         write_aws_credentials(key_id, secret, session_token)
         ok()
+
+
+@cli.command()
+@click.option('--url', '-u', help='SAML identity provider URL')
+@click.option('--user', '-U', prompt='Username')
+@click.option('--password', '-p', help='Password')
+@click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
+@click.option('--overwrite-credentials', help='Always overwrite AWS credentials file', is_flag=True)
+@click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
+@click.pass_context
+def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars):
+    """
+    Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
+    """
+    url = url or ctx.obj.saml_identity_provider_url
+
+    if not url:
+        raise click.UsageError('Please specify SAML identity provider URL in config file or use "--url"')
+
+    saml_login(ctx.obj.region, url, user, password, role, overwrite_credentials, print_env_vars)
 
 
 def main():
