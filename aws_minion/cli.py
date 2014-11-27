@@ -268,6 +268,9 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     if not domain and not data.get('domain'):
         action('Trying to autodetect DNS domain..')
         dns_conn = boto.route53.connect_to_region(region)
+        if not dns_conn:
+            error('CONNECTION FAILED')
+            return
         zones = dns_conn.get_zones()
         if len(zones) == 1:
             data['domain'] = zones[0].name.rstrip('.')
