@@ -830,7 +830,7 @@ def print_remote_file(instance, application, remote_file_path: str):
     parameters:
 
     instance:         target EC2 instance
-    application_name: name of the application e.g. 'logmeister'
+    application:      coressponding application instance 
     remote_file_path: path of the target file on the EC2 instance
     """
     key_file = application.get_key_file_path()
@@ -1203,6 +1203,23 @@ def log(ctx, application_name: str, application_version, start, until, size):
     # output log data
     for event in response_in_json['events']:
         click.echo(event['event']['json']['log'], nl=False)
+
+
+
+
+@applications.command()
+@click.argument('application-name')
+@click.argument('instance-id')
+@click.argument('remote-file-path')
+@click.pass_context
+def rcat(ctx, application_name: str, instance_id: str, remote_file_path: str):
+    # def print_remote_file(instance, application, remote_file_path: str):
+    app = ctx.obj.get_application(application_name)
+    instance = ctx.obj.get_instance_by_id(instance_id)
+    if instance is None:
+        error('Could not find instance with id "{}"'.format(instance_id))
+        return
+    print_remote_file(instance, app, remote_file_path)
 
 
 def main():

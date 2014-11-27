@@ -164,6 +164,13 @@ class Context:
     def get_instances_by_app_identifier_and_state(self, app_identifier: str, state: str) -> [ApplicationInstance]:
         return [i for i in self.get_instances() if i.state == state and i.tags['Name'] == app_identifier]
 
+    
+    def get_instance_by_id(self, instance_id: str) -> [ApplicationInstance]:
+        for instance in self.get_instances():
+            if instance.id == instance_id:
+                return instance
+        return None
+
     def find_ssl_certificate_arn(self) -> str:
         iam_conn = boto.iam.connect_to_region(self.region)
         expected_cert_name = self.domain.replace('.', '-')
