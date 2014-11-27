@@ -1397,7 +1397,7 @@ def tail_version_logs(ctx, application_name: str, application_version, start, lo
                 break
 
             event_data = event['event']
-            if 'json' in  event_data:
+            if 'json' in event_data:
                 event_data = event_data['json']
                 if 'log' in event_data:
                     click.echo(event_data['log'], nl=False)
