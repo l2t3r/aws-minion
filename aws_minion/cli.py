@@ -292,7 +292,11 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
         data['ssl_certificate_arn'] = temp_context.find_ssl_certificate_arn()
         ok()
 
-    ask('SSL certificate ARN', 'ssl_certificate_arn', suggestion='arn:aws:iam::123:server-certificate/mycert')
+    ask('SSL certificate ARN (enter "-" to skip)', 'ssl_certificate_arn',
+        suggestion='arn:aws:iam::123:server-certificate/mycert')
+    if len(data['ssl_certificate_arn']) < 2:
+        # one character was entered (i.e. skip SSL), clear the certificate setting
+        data['ssl_certificate_arn'] = None
 
     # handle Loggly configuration if needed
     configure_loggly = loggly_auth_token or click.confirm('Do you want to configure Loggly?', default=True)
@@ -304,8 +308,10 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
         ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
             hide_input=True)
 
+    action('Storing configuration in {path}..', path=CONFIG_FILE_PATH)
     with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
         fd.write(yaml.dump(data, default_flow_style=False))
+    ok()
     ctx.obj = Context(data)
 
 
