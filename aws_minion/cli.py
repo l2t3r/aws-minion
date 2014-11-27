@@ -62,7 +62,7 @@ SLEEP_TIME_IN_S = 5
 
 LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
                                  '?q=syslog.appName:{app_identifier}&from={start}&until={until}&order=asc'
-LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://zalando.loggly.com/apiv2/events?rsid={}'
+LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/events?rsid={rsid}'
 
 
 def validate_application_name(ctx, param, value):
@@ -1190,9 +1190,10 @@ def send_request_to_loggly(ctx, request: str):
 def show_version_logs(ctx, application_name: str, application_version, start, until, size):
     app_config = ctx.obj.config
     app_identifier = '{}-{}'.format(application_name, application_version)
+    account = app_config['loggly_account']
 
     # request search and obtain rsid
-    request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=app_config['loggly_account'],
+    request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=account,
                                                     app_identifier=app_identifier,
                                                     start=start,
                                                     until=until)
@@ -1203,7 +1204,7 @@ def show_version_logs(ctx, application_name: str, application_version, start, un
     rsid = response_in_json['rsid']['id']
 
     # obtain log data fetched by foregoing search request
-    request = LOGGLY_EVENTS_REQUEST_TEMPLATE.format(rsid)
+    request = LOGGLY_EVENTS_REQUEST_TEMPLATE.format(account=account, rsid=rsid)
     response_in_json = send_request_to_loggly(ctx, request)
     if not response_in_json:
         return
