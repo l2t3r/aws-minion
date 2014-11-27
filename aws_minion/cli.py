@@ -54,9 +54,11 @@ HEALTH_CHECK_INTERVAL_IN_S = 20
 UNHEALTHY_THRESHOLD = 5
 SLEEP_TIME_IN_S = 5
 
-LOGGLY_ACCOUNT = 'zalando' 
-LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search?q=syslog.appName:{app_identifier}&from={start}&until={until}&order=asc'
+LOGGLY_ACCOUNT = 'zalando'
+LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
+                                 '?q=syslog.appName:{app_identifier}&from={start}&until={until}&order=asc'
 LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://zalando.loggly.com/apiv2/events?rsid={}'
+
 
 def validate_application_name(ctx, param, value):
     """
@@ -1156,6 +1158,21 @@ def delete(ctx, application_name: str):
     ok()
 
 
+def send_request_to_loggly(ctx, request: str):
+    app_config = ctx.obj.config
+
+    if 'loggly_user' not in app_config:
+        error('No Loggly credentials configured. Please set them via `app configure`')
+
+    response = requests.get(request, auth=(app_config['loggly_user'], app_config['loggly_password']))
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        error('Request "{}" failed with status code {}'.format(request, response.status_code))
+        return None
+
+
 @versions.command('log')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
@@ -1164,37 +1181,29 @@ def delete(ctx, application_name: str):
 @click.argument('size', default=50)
 @click.pass_context
 def log(ctx, application_name: str, application_version, start, until, size):
-    app_config = ctx.obj.config
-     
-    if not 'loggly_user' in app_config:
-        error('No Loggly credentials configured. Please set them via `app configure`');
-  
     app_identifier = '{}-{}'.format(application_name, application_version)
-    
-    # request search and obtain rsid 
-    search_request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=LOGGLY_ACCOUNT, app_identifier=app_identifier, start=start, until=until)
-    search_request_response = requests.get(search_request, auth=(app_config['loggly_user'], app_config['loggly_password']))
-    
-    if search_request_response.status_code != 200:
-       error('Search request "{}" failed with status code {}'.format(search_request, search_request_response.status_code))
-       return
-  
-    rsid = search_request_response.json()['rsid']['id']
-    
-    # obtain log data fetched by foregoing search request 
-    data_request = LOGGLY_EVENTS_REQUEST_TEMPLATE.format(rsid)
-    data_request_response = requests.get(data_request, auth=(app_config['loggly_user'], app_config['loggly_password']))
-    
-    if data_request_response.status_code != 200:
-       error('data request "{}" failed with status code {}'.format(data_request, data_request_response.status_code))
-       return
 
-    log_data = data_request_response.json()
+    # request search and obtain rsid
+    request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=LOGGLY_ACCOUNT,
+                                                    app_identifier=app_identifier,
+                                                    start=start,
+                                                    until=until)
+    response_in_json = send_request_to_loggly(ctx, request)
+    if not response_in_json:
+        return
 
-    # output log data 
-    for event in log_data['events']:
+    rsid = response_in_json['rsid']['id']
+
+    # obtain log data fetched by foregoing search request
+    request = LOGGLY_EVENTS_REQUEST_TEMPLATE.format(rsid)
+    response_in_json = send_request_to_loggly(ctx, request)
+    if not response_in_json:
+        return
+
+    # output log data
+    for event in response_in_json['events']:
         click.echo(event['event']['json']['log'], nl=False)
-    
+
 
 def main():
     cli()
