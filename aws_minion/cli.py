@@ -1208,6 +1208,9 @@ def print_if_app_log(event):
 @click.argument('size', default=LOGGLY_REQUEST_SIZE)
 @click.pass_context
 def show_version_logs(ctx, application_name: str, application_version, start, until, size):
+    """
+    Show logs of one application version via Loggly
+    """
     app_config = ctx.obj.config
     app_identifier = '{}-{}'.format(application_name, application_version)
     account = app_config['loggly_account']
@@ -1369,6 +1372,9 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
 @click.argument('log-request-size', default=LOGGLY_REQUEST_SIZE)
 @click.pass_context
 def tail_version_logs(ctx, application_name: str, application_version, start, log_request_size):
+    """
+    Tail logs of one application version via Loggly
+    """
     app_config = ctx.obj.config
     app_identifier = '{}-{}'.format(application_name, application_version)
     account = app_config['loggly_account']
