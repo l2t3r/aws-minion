@@ -175,6 +175,7 @@ def write_aws_credentials(key_id, secret, session_token=None):
 
 
 def ensure_aws_credentials(region):
+    extra_config = {}
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     if not os.path.exists(credentials_path):
         options = ['Use existing AWS Access Key', 'Perform SAML login']
@@ -184,11 +185,13 @@ def ensure_aws_credentials(region):
             url = click.prompt('SAML Identity Provider URL')
             user = click.prompt('SAML Username')
             saml_login(region, url, user, overwrite_credentials=True)
+            extra_config['saml_identity_provider_url'] = url
+            extra_config['saml_user'] = user
         else:
             key_id = click.prompt('AWS Access Key ID')
             secret = click.prompt('AWS Secret Access Key', hide_input=True)
             write_aws_credentials(key_id, secret)
-    return region
+    return region, extra_config
 
 
 @cli.command()
@@ -206,7 +209,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     """
     Configure the AWS and Loggly connection settings
     """
-    region = ensure_aws_credentials(region)
+    region, extra_config = ensure_aws_credentials(region)
 
     # load config file
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
@@ -215,6 +218,8 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
             data = yaml.safe_load(fd)
     else:
         data = {}
+
+    data.update(extra_config)
 
     param_data = {'region': region,
                   'vpc': vpc,
@@ -1347,8 +1352,8 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
 
 @cli.command()
 @click.option('--url', '-u', help='SAML identity provider URL')
-@click.option('--user', '-U', prompt='Username')
-@click.option('--password', '-p', help='Password')
+@click.option('--user', '-U', help='SAML Username')
+@click.option('--password', '-p', help='SAML Password')
 @click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
 @click.option('--overwrite-credentials', help='Always overwrite AWS credentials file', is_flag=True)
 @click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
@@ -1361,6 +1366,8 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
 
     if not url:
         raise click.UsageError('Please specify SAML identity provider URL in config file or use "--url"')
+
+    user = user or ctx.obj.saml_user or click.prompt('SAML Username')
 
     saml_login(ctx.obj.region, url, user, password, role, overwrite_credentials, print_env_vars)
 

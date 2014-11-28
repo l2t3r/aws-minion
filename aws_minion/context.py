@@ -117,6 +117,10 @@ class Context:
     def saml_identity_provider_url(self):
         return self.config.get('saml_identity_provider_url')
 
+    @property
+    def saml_user(self):
+        return self.config.get('saml_user')
+
     def get_application(self, application_name: str) -> Application:
         security_group = self.get_security_group(IDENTIFIER_PREFIX + application_name)
         if not security_group:
