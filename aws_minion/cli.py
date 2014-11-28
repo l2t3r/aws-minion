@@ -890,6 +890,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
 
+    # TODO: map subnets to layers (public, shared, private)
+
     app = ctx.obj.get_application(application_name)
     sg, manifest = app.security_group, app.manifest
 
@@ -930,6 +932,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
+    # TODO: launch instances in private subnets
     vpc_info = ','.join([subnet.id for subnet in subnets])
 
     with Action('Creating launch configuration for {application_name} version {application_version}..', **vars()):
@@ -963,6 +966,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         else:
             ports = [(80, manifest['exposed_ports'][0], 'http')]
         elb_conn = boto.ec2.elb.connect_to_region(region)
+        # TODO: create ELB in "shared" subnet
         lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
                                            subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
         lb.configure_health_check(hc)
