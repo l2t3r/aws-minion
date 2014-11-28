@@ -61,8 +61,10 @@ EXTRA_WAIT_TIME = 180
 SLEEP_TIME_IN_S = 5
 
 LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
-                                 '?q=syslog.appName:{app_identifier}&from={start}&until={until}&order=asc'
+                                 '?q=syslog.appName:{app_identifier}&from={start}&until={until}&size={size}&order=asc'
 LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/events?rsid={rsid}'
+LOGGLY_TAIL_START_TIME = '-5m'
+LOGGLY_REQUEST_SIZE = 10000
 
 
 def validate_application_name(ctx, param, value):
@@ -1172,41 +1174,49 @@ def send_request_to_loggly(ctx, request: str):
         return None
 
 
-@versions.command('logs')
-@click.argument('application-name', callback=validate_application_name)
-@click.argument('application-version', callback=validate_application_version)
-@click.argument('start', default='-24h')
-@click.argument('until', default='now')
-@click.argument('size', default=50)
-@click.pass_context
-def show_version_logs(ctx, application_name: str, application_version, start, until, size):
-    """
-    Show logs of one specific application version
-    """
-    app_config = ctx.obj.config
-    app_identifier = '{}-{}'.format(application_name, application_version)
-    account = app_config['loggly_account']
-
+def request_loggly_logs(ctx, account: str, app_identifier: str, start: str, until: str, size):
     # request search and obtain rsid
     request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=account,
                                                     app_identifier=app_identifier,
                                                     start=start,
-                                                    until=until)
+                                                    until=until,
+                                                    size=size)
     response_in_json = send_request_to_loggly(ctx, request)
     if not response_in_json:
-        return
+        return None
 
     rsid = response_in_json['rsid']['id']
 
     # obtain log data fetched by foregoing search request
     request = LOGGLY_EVENTS_REQUEST_TEMPLATE.format(account=account, rsid=rsid)
-    response_in_json = send_request_to_loggly(ctx, request)
-    if not response_in_json:
-        return
+    return send_request_to_loggly(ctx, request)
+
+
+def print_if_app_log(event):
+    event_data = event['event']
+    if 'json' in event_data:
+        event_data = event_data['json']
+        if 'log' in event_data:
+            click.echo(event_data['log'], nl=False)
+
+
+@versions.command('logs')
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
+@click.argument('start', default='-1h')
+@click.argument('until', default='now')
+@click.argument('size', default=LOGGLY_REQUEST_SIZE)
+@click.pass_context
+def show_version_logs(ctx, application_name: str, application_version, start, until, size):
+    app_config = ctx.obj.config
+    app_identifier = '{}-{}'.format(application_name, application_version)
+    account = app_config['loggly_account']
+
+    response_in_json = request_loggly_logs(ctx, account, app_identifier, start, until, size)
 
     # output log data
     for event in response_in_json['events']:
-        click.echo(event['event']['json']['log'], nl=False)
+        print_if_app_log(event)
 
 
 @instances.command('logs')
@@ -1350,6 +1360,43 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
         raise click.UsageError('Please specify SAML identity provider URL in config file or use "--url"')
 
     saml_login(ctx.obj.region, url, user, password, role, overwrite_credentials, print_env_vars)
+
+
+@versions.command('tail')
+@click.argument('application-name', callback=validate_application_name)
+@click.argument('application-version', callback=validate_application_version)
+@click.argument('start', default=LOGGLY_TAIL_START_TIME)
+@click.argument('log-request-size', default=LOGGLY_REQUEST_SIZE)
+@click.pass_context
+def tail_version_logs(ctx, application_name: str, application_version, start, log_request_size):
+    app_config = ctx.obj.config
+    app_identifier = '{}-{}'.format(application_name, application_version)
+    account = app_config['loggly_account']
+
+    recent_event_ids = set()
+    last_timestamp = 0
+    while True:
+        response_in_json = request_loggly_logs(ctx, account, app_identifier, start, 'now', log_request_size)
+
+        # Given start time might be far in the past. All following requests do not need
+        # to be that far in the past
+        start = LOGGLY_TAIL_START_TIME
+
+        for event in response_in_json['events']:
+            timestamp = event['timestamp']
+            event_id = event['id']
+            # NOTE: different events can have the same timestamp
+            if timestamp >= last_timestamp and event_id not in recent_event_ids:
+                if len(recent_event_ids) >= log_request_size:
+                    recent_event_ids.clear()
+                recent_event_ids.add(event_id)
+                last_timestamp = timestamp
+            else:
+                break
+
+            print_if_app_log(event)
+
+        time.sleep(1)
 
 
 def main():
