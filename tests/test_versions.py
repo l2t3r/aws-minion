@@ -7,7 +7,7 @@ from aws_minion.cli import cli
 from aws_minion.context import Context, ApplicationVersion, Application
 
 
-def test_list_versions(monkeypatch):
+def test_versions_list(monkeypatch):
 
 
     auto_scaling_group = MagicMock()
@@ -35,7 +35,7 @@ def test_list_versions(monkeypatch):
     assert cols == ['myapp', '1.0', 'foo/bar:123', '(no', 'instances)', '3', '60.0']
 
 
-def test_create_version(monkeypatch):
+def test_versions_create(monkeypatch):
     monkeypatch.setattr('boto.vpc.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
@@ -72,3 +72,7 @@ def test_create_version(monkeypatch):
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'create', 'myapp', '1.0', 'mydocker:2.3', '-e', 'MY_ENV_VAR=123'], catch_exceptions=False)
 
     assert 'ABORTED. Default health check time to wait for members to become active has been exceeded.' in result.output
+
+
+def test_versions_traffic(monkeypatch):
+    pass

@@ -9,6 +9,7 @@ import time
 import datetime
 import re
 from xml.etree import ElementTree
+from boto.route53.record import ResourceRecordSets
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
@@ -423,7 +424,12 @@ def instances(ctx):
         print_table('application_name application_version instance_id team ip_address state launch_time'.split(), rows)
 
 
-def get_weights(dns_name, identifier, rr):
+def get_weights(dns_name: str, identifier: str, rr: ResourceRecordSets) -> ({str: int}, int, int):
+    """
+    For the given dns_name, get the dns record weights from provided dns record set
+    followed by partial count and partial weight sum.
+    Here partial means without the element that we are operating now on.
+    """
     partial_count = 0
     partial_sum = 0
     known_record_weights = {}
@@ -465,6 +471,10 @@ def calculate_new_weights(delta, identifier, known_record_weights, percentage):
 
 def compensate(calculation_error, compensations, identifier, new_record_weights, partial_count,
                percentage, identifier_versions):
+    """
+    Compensate for the rounding errors as well as for the fact, that we do not allow to bring down the minimal weights
+    lower then minimal possible value not to disable traffic from the minimally configured versions (1).
+    """
     forced_delta = None
     # distribute the error on the versions, other then the current one
     part = calculation_error / partial_count
@@ -527,7 +537,6 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     region = ctx.region
     domain = ctx.domain
 
-    percentage = int(percentage * PERCENT_RESOLUTION)
     version_list = ctx.get_versions(application_name)
     if not versions:
         raise click.BadParameter('Could not find any versions for application')
@@ -543,6 +552,7 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     dns_name = '{}.{}.'.format(application_name, domain)
     lb = version.get_load_balancer()
     rr = zone.get_records()
+    percentage = int(percentage * PERCENT_RESOLUTION)
     known_record_weights, partial_count, partial_sum = get_weights(dns_name, identifier, rr)
     with Action('Calculating new weights..'):
         compensations = {}
@@ -564,10 +574,10 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
             'application_name': application_name,
             'version': str(identifier_versions[i]),
             'identifier': i,
-            'old_weight': known_record_weights[i],
-            'delta': delta if i != identifier else forced_delta,
-            'compensation': compensations.get(i, None),
-            'new_weight': new_record_weights[i],
+            'old_weight': known_record_weights[i] / PERCENT_RESOLUTION,
+            'delta': delta / PERCENT_RESOLUTION if i != identifier else forced_delta,
+            'compensation': compensations[i] / PERCENT_RESOLUTION if i in compensations else None,
+            'new_weight': new_record_weights[i] / PERCENT_RESOLUTION,
         } for i in known_record_weights.keys()
     ]
     print_table('application_name version identifier old_weight delta compensation new_weight'.split(),
