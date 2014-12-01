@@ -36,11 +36,17 @@ def test_list_versions(monkeypatch):
 
 
 def test_create_version(monkeypatch):
-    monkeypatch.setattr('boto.vpc.connect_to_region', MagicMock())
+    subnet = MagicMock()
+    subnet.id = 'subnet-mysubnet'
+    vpc_conn = MagicMock()
+    vpc_conn.get_all_subnets = lambda x: [subnet]
+
+    monkeypatch.setattr('boto.vpc.connect_to_region', vpc_conn)
     monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.elb.connect_to_region', MagicMock())
     monkeypatch.setattr('time.sleep', lambda s: s)
+    monkeypatch.setattr('aws_minion.cli.map_subnets', lambda s, r: {'public': [subnet], 'private': []})
 
     security_group = MagicMock()
     security_group.tags = {'Manifest': json.dumps({'exposed_ports': [8080], 'team_name': 'MyTeam'})}

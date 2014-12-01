@@ -869,6 +869,29 @@ def print_remote_file(instance, application, remote_file_path: str):
               .format(remote_file_path, instance.name, status, stderr))
 
 
+def map_subnets(subnets: list, route_tables: list) -> dict:
+    """
+    Map VPC subnets to layers
+    """
+    subnet_has_internet_gateway = {}
+    for table in route_tables:
+        has_internet_gateway = False
+        for route in table.routes:
+            if route['gateway_id'].startswith('igw-'):
+                has_internet_gateway = True
+        for assoc in table.associations:
+            subnet_has_internet_gateway[assoc.subnet_id] = has_internet_gateway
+    by_layer = {'public': [], 'shared': [], 'private': []}
+    for subnet in subnets:
+        layer = 'private'
+        if subnet_has_internet_gateway.get(subnet.id):
+            layer = 'public'
+        elif 'shared' in subnet.tags.get('Name').lower():
+            layer = 'shared'
+        by_layer[layer].append(subnet)
+    return by_layer
+
+
 @versions.command('create')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
@@ -889,8 +912,20 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
+    route_tables = vpc_conn.get_all_route_tables()
+    subnets_by_layer = map_subnets(subnets, route_tables)
 
-    # TODO: map subnets to layers (public, shared, private)
+    # TODO: create ELB in "shared" subnet
+    elb_layer = 'public'
+    # launch instances in private subnets by default
+    instance_layer = 'private'
+
+    if not subnets_by_layer['public']:
+        raise Exception('No public subnet available in VPC {}.'.format(vpc))
+
+    if not subnets_by_layer['private']:
+        warning('No private subnet available, using public subnet(s) for instances.')
+        instance_layer = 'public'
 
     app = ctx.obj.get_application(application_name)
     sg, manifest = app.security_group, app.manifest
@@ -932,8 +967,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
-    # TODO: launch instances in private subnets
-    vpc_info = ','.join([subnet.id for subnet in subnets])
+    vpc_info = ','.join([subnet.id for subnet in subnets_by_layer[instance_layer]])
 
     with Action('Creating launch configuration for {application_name} version {application_version}..', **vars()):
         lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
@@ -966,9 +1000,9 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         else:
             ports = [(80, manifest['exposed_ports'][0], 'http')]
         elb_conn = boto.ec2.elb.connect_to_region(region)
-        # TODO: create ELB in "shared" subnet
         lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
-                                           subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
+                                           subnets=[subnet.id for subnet in subnets_by_layer[elb_layer]],
+                                           security_groups=[lb_sg.id])
         lb.configure_health_check(hc)
 
     group_name = 'app-{}-{}'.format(application_name, application_version)
@@ -976,7 +1010,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
                           load_balancers=[dns_name],
-                          availability_zones=[subnet.availability_zone for subnet in subnets],
+                          availability_zones=[subnet.availability_zone for subnet in subnets_by_layer[instance_layer]],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
                           connection=autoscale)
