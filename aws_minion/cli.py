@@ -877,7 +877,7 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
     for table in route_tables:
         has_internet_gateway = False
         for route in table.routes:
-            if route['gateway_id'].startswith('igw-'):
+            if route.gateway_id and route.gateway_id.startswith('igw-'):
                 has_internet_gateway = True
         for assoc in table.associations:
             subnet_has_internet_gateway[assoc.subnet_id] = has_internet_gateway
