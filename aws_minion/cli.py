@@ -8,6 +8,7 @@ import time
 import datetime
 import re
 from xml.etree import ElementTree
+from boto.exception import BotoServerError
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
@@ -24,6 +25,7 @@ from bs4 import BeautifulSoup
 import click
 import keyring
 import requests
+import sys
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
@@ -1208,8 +1210,20 @@ def tail_version_logs(ctx, application_name: str, application_version, start, lo
         time.sleep(1)
 
 
+def is_credentials_expired_error(e: BotoServerError) -> bool:
+    return (e.status == 400 and 'request has expired' in e.message.lower()) or \
+           (e.status == 403 and 'security token included in the request is expired' in e.message.lower())
+
+
 def main():
-    cli()
+    try:
+        cli()
+    except BotoServerError as e:
+        if is_credentials_expired_error(e):
+            sys.stderr.write('AWS credentials have expired. Use "minion login" to get a new temporary access key.\n')
+            sys.exit(1)
+        else:
+            raise
 
 
 if __name__ == '__main__':
