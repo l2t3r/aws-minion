@@ -145,17 +145,20 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.option('--config-file', '-c', help='Use alternative configuration file', default=CONFIG_FILE_PATH)
+@click.option('--profile', '-p', help='Configuration profile to use', default='default', envvar='AWS_MINION_PROFILE')
 @click.pass_context
-def cli(ctx, config_file):
+def cli(ctx, config_file, profile):
     path = os.path.expanduser(config_file)
     data = {}
     if os.path.exists(path):
         with open(path, 'rb') as fd:
             data = yaml.safe_load(fd)
 
-    if not data and not 'configure'.startswith(ctx.invoked_subcommand):
-        raise click.UsageError('Please run "minion configure" first.')
-    ctx.obj = Context(data)
+    profile_data = data.get(profile, {})
+    if not profile_data and not 'configure'.startswith(ctx.invoked_subcommand):
+        raise click.UsageError(('Profile "{}" has no configuration. ' +
+                                'Please run "minion configure" first.').format(profile))
+    ctx.obj = Context(profile_data, profile)
 
 
 def write_aws_credentials(key_id, secret, session_token=None):
@@ -215,7 +218,8 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
     if os.path.exists(CONFIG_FILE_PATH):
         with open(CONFIG_FILE_PATH, 'rb') as fd:
-            data = yaml.safe_load(fd)
+            all_data = yaml.safe_load(fd)
+        data = all_data.get(ctx.obj.profile, {})
     else:
         data = {}
 
@@ -324,10 +328,9 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
         ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
             hide_input=True)
 
+    ctx.obj = Context(data, ctx.obj.profile)
     with Action('Storing configuration in {path}..', path=CONFIG_FILE_PATH):
-        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
-            fd.write(yaml.dump(data, default_flow_style=False))
-    ctx.obj = Context(data)
+        ctx.obj.write_config(CONFIG_FILE_PATH)
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)

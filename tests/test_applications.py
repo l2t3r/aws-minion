@@ -16,7 +16,7 @@ def test_create_application(monkeypatch):
 
     context = Context({'region': 'caprica', 'vpc': 'myvpc'})
     context.get_application = raise_application_not_found
-    context_constructor = lambda x: context
+    context_constructor = lambda x, y: context
 
     monkeypatch.setattr('aws_minion.cli.Context', context_constructor)
 
@@ -32,8 +32,7 @@ def test_create_application(monkeypatch):
         with open('myapp.yaml', 'w') as fd:
             yaml.dump(data, fd)
 
-        with open('config.yaml', 'w') as fd:
-            yaml.dump(context.config, fd)
+        context.write_config('config.yaml')
 
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'applications', 'create', 'myapp.yaml'], catch_exceptions=False)
 
@@ -47,15 +46,14 @@ def test_list_applications(monkeypatch):
     security_group.tags = {'Manifest': yaml.dump({'application_name': 'myapp', 'team_name': 'MyTeam', 'exposed_ports': [123]})}
 
     context.get_applications = lambda: [Application('myapp', security_group)]
-    context_constructor = lambda x: context
+    context_constructor = lambda x, y: context
 
     monkeypatch.setattr('aws_minion.cli.Context', context_constructor)
 
     runner = CliRunner()
 
     with runner.isolated_filesystem():
-        with open('config.yaml', 'w') as fd:
-            yaml.dump(context.config, fd)
+        context.write_config('config.yaml')
 
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'app'], catch_exceptions=False)
 
