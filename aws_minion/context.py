@@ -98,8 +98,9 @@ class ApplicationInstance:
 
 
 class Context:
-    def __init__(self, config):
+    def __init__(self, config, profile='default'):
         self.config = config
+        self.profile = profile
 
     @property
     def region(self):
@@ -120,6 +121,17 @@ class Context:
     @property
     def saml_user(self):
         return self.config.get('saml_user')
+
+    def write_config(self, path):
+        try:
+            # load all configs (all profiles)
+            with open(path, 'rb') as fd:
+                data = yaml.safe_load(fd)
+        except:
+            data = {}
+        data.update({self.profile: self.config})
+        with open(path, 'w') as fd:
+            yaml.dump(data, fd, default_flow_style=False)
 
     def get_application(self, application_name: str) -> Application:
         security_group = self.get_security_group(IDENTIFIER_PREFIX + application_name)
@@ -149,12 +161,13 @@ class Context:
         dns_conn = boto.route53.connect_to_region(self.region)
         zone = dns_conn.get_zone(self.domain + '.')
 
-        rr = zone.get_records()
-
         weights = {}
-        for r in rr:
-            if r.type == 'CNAME' and r.identifier and r.weight:
-                weights[r.identifier] = int(r.weight)
+        if zone:
+            rr = zone.get_records()
+
+            for r in rr:
+                if r.type == 'CNAME' and r.identifier and r.weight:
+                    weights[r.identifier] = int(r.weight)
 
         for group in groups:
             if group.name.startswith(IDENTIFIER_PREFIX):

@@ -134,7 +134,10 @@ def print_table(cols, rows):
         click.echo('')
 
 
-def choice(prompt, options):
+def choice(prompt: str, options: list):
+    """
+    Ask to user to select one option and return it
+    """
     click.secho(prompt)
     for i, option in enumerate(options):
         if isinstance(option, tuple):
@@ -153,3 +156,20 @@ def choice(prompt, options):
             return value
         except:
             pass
+
+
+class AliasedGroup(click.Group):
+    """
+    Click group which allows using abbreviated commands
+    """
+    def get_command(self, ctx, cmd_name):
+        rv = click.Group.get_command(self, ctx, cmd_name)
+        if rv is not None:
+            return rv
+        matches = [x for x in self.list_commands(ctx)
+                   if x.startswith(cmd_name)]
+        if not matches:
+            return None
+        elif len(matches) == 1:
+            return click.Group.get_command(self, ctx, matches[0])
+        ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))

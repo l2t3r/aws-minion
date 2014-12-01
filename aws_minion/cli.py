@@ -4,12 +4,12 @@ import shlex
 from textwrap import dedent
 import collections
 import os
-import random
 import time
 import datetime
 import re
 from xml.etree import ElementTree
 from boto.route53.record import ResourceRecordSets
+from boto.exception import BotoServerError
 import boto.vpc
 import boto.ec2
 import boto.ec2.elb
@@ -26,12 +26,16 @@ from bs4 import BeautifulSoup
 import click
 import keyring
 import requests
+import sys
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 
-from aws_minion.console import print_table, action, ok, error, warning, choice, Action
+from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound
+from aws_minion.docker import is_docker_image_valid, generate_env_options
+from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
+    prepare_log_shipper_script
 from aws_minion.utils import FloatRange
 
 # FIXME: hardcoded for eu-west-1: Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
@@ -60,12 +64,6 @@ HEALTH_CHECK_INTERVAL_IN_S = 20
 UNHEALTHY_THRESHOLD = 5
 EXTRA_WAIT_TIME = 180
 SLEEP_TIME_IN_S = 5
-
-LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
-                                 '?q=syslog.appName:{app_identifier}&from={start}&until={until}&size={size}&order=asc'
-LOGGLY_EVENTS_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/events?rsid={rsid}'
-LOGGLY_TAIL_START_TIME = '-5m'
-LOGGLY_REQUEST_SIZE = 10000
 
 
 def validate_application_name(ctx, param, value):
@@ -101,30 +99,6 @@ def validate_vpc_id(ctx, param, value):
     return value
 
 
-class AliasedGroup(click.Group):
-    def get_command(self, ctx, cmd_name):
-        rv = click.Group.get_command(self, ctx, cmd_name)
-        if rv is not None:
-            return rv
-        matches = [x for x in self.list_commands(ctx)
-                   if x.startswith(cmd_name)]
-        if not matches:
-            return None
-        elif len(matches) == 1:
-            return click.Group.get_command(self, ctx, matches[0])
-        ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
-
-
-def generate_random_name(prefix: str, size: int) -> str:
-    """
-    See GenerateRandomName in vendor/src/github.com/docker/libcontainer/utils/utils.go
-
-    >>> len(generate_random_name('abc', 4))
-    7
-    """
-    return '{}%0{}x'.format(prefix, size) % random.randrange(16 ** size)
-
-
 def modify_sg(c, group, rule, authorize=False, revoke=False):
     src_group = None
     if rule.src_group_name:
@@ -146,17 +120,20 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.option('--config-file', '-c', help='Use alternative configuration file', default=CONFIG_FILE_PATH)
+@click.option('--profile', '-p', help='Configuration profile to use', default='default', envvar='AWS_MINION_PROFILE')
 @click.pass_context
-def cli(ctx, config_file):
+def cli(ctx, config_file, profile):
     path = os.path.expanduser(config_file)
     data = {}
     if os.path.exists(path):
         with open(path, 'rb') as fd:
             data = yaml.safe_load(fd)
 
-    if not data and not 'configure'.startswith(ctx.invoked_subcommand):
-        raise click.UsageError('Please run "minion configure" first.')
-    ctx.obj = Context(data)
+    profile_data = data.get(profile, {})
+    if not profile_data and not 'configure'.startswith(ctx.invoked_subcommand):
+        raise click.UsageError(('Profile "{}" has no configuration. ' +
+                                'Please run "minion configure" first.').format(profile))
+    ctx.obj = Context(profile_data, profile)
 
 
 def write_aws_credentials(key_id, secret, session_token=None):
@@ -216,7 +193,8 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
     if os.path.exists(CONFIG_FILE_PATH):
         with open(CONFIG_FILE_PATH, 'rb') as fd:
-            data = yaml.safe_load(fd)
+            all_data = yaml.safe_load(fd)
+        data = all_data.get(ctx.obj.profile, {})
     else:
         data = {}
 
@@ -325,10 +303,9 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
         ask('Loggly Auth Token', 'loggly_auth_token', suggestion='08ac9b07-050e-4eac-99b0-af672d8d43ca',
             hide_input=True)
 
+    ctx.obj = Context(data, ctx.obj.profile)
     with Action('Storing configuration in {path}..', path=CONFIG_FILE_PATH):
-        with open(CONFIG_FILE_PATH, 'w', encoding='utf-8') as fd:
-            fd.write(yaml.dump(data, default_flow_style=False))
-    ctx.obj = Context(data)
+        ctx.obj.write_config(CONFIG_FILE_PATH)
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
@@ -671,185 +648,6 @@ def delete_version(ctx, application_name: str, application_version: str):
             lb.delete()
 
 
-def generate_env_options(env_vars: dict):
-    """
-    Generate Docker env options (-e) for a given dictionary
-
-    >>> generate_env_options({})
-    ''
-
-    >>> generate_env_options({'a': 1})
-    '-e a=1'
-
-    >>> generate_env_options({'a': '; rm -fr'})
-    "-e 'a=; rm -fr'"
-    """
-    options = []
-    for key, value in sorted(env_vars.items()):
-        options.append('-e')
-        options.append(shlex.quote('{}={}'.format(key, value)))
-
-    return ' '.join(options)
-
-
-def prepare_log_shipper_script(application_name, application_version, data):
-    if not data.get('loggly_auth_token'):
-        return ''
-    return dedent('''\
-        #!/bin/bash
-        LOG_FILE=/var/log/docker.log
-
-        containerId=$1
-        if [ "$containerId" = "" ]
-        then
-           echo "no Docker container id passed to log shipper script"
-           exit 1
-        fi
-
-        mkdir -pv /etc/rsyslog.d/keys/ca.d
-        cd /etc/rsyslog.d/keys/ca.d/
-        wget https://logdog.loggly.com/media/loggly.com.crt
-        wget https://certs.starfieldtech.com/repository/sf_bundle.crt
-        cat {{sf_bundle.crt,loggly.com.crt}} > loggly_full.crt
-        rm {{sf_bundle.crt,loggly.com.crt}}
-        cd
-
-        currentDockerFile=/var/lib/docker/containers/$containerId/$containerId-json.log
-
-        ln $currentDockerFile $LOG_FILE
-        chmod 666 $LOG_FILE
-
-        f=/etc/rsyslog.d/22-loggly.conf
-
-        # Define the template used for sending logs to Loggly. Do not change this format.
-        (
-            echo '$template LogglyFormat,"<%pri%>%protocol-version% %timestamp:::date-rfc3339% \
-%HOSTNAME% %app-name% %procid% %msgid% [{loggly_auth_token}@41058 tag=\\"system\\" tag=\\"TLS\\"] %msg%\\n"'
-            echo '#RsyslogGnuTLS'
-            echo '$DefaultNetstreamDriverCAFile /etc/rsyslog.d/keys/ca.d/loggly_full.crt'
-            echo '$ActionSendStreamDriver gtls'
-            echo '$ActionSendStreamDriverMode 1'
-            echo '$ActionSendStreamDriverAuthMode x509/name'
-            echo '$ActionSendStreamDriverPermittedPeer *.loggly.com'
-            echo '*.* @@logs-01.loggly.com:6514;LogglyFormat'
-        ) > $f
-
-        f=/etc/rsyslog.d/21-filemonitoring-{application_name}-{application_version}.conf
-        (
-            echo '$ModLoad imfile'
-            echo '$InputFilePollInterval 10'
-            echo '$WorkDirectory /var/spool/rsyslog'
-            echo '$PrivDropToGroup adm'
-            echo '$InputFileName /var/log/docker.log'
-            echo '$InputFileTag {application_name}-{application_version}:'
-            echo '$InputFileStateFile stat-{application_name}-{application_version}'
-            echo '$InputFileSeverity info'
-            echo '$InputFilePersistStateInterval 20000'
-            echo '$InputRunFileMonitor'
-            echo '$template LogglyFormatFile{application_name}-{application_version},"<%pri%>%protocol-version% \
-%timestamp:::date-rfc3339% %HOSTNAME% %app-name% %procid% %msgid% \
-[{loggly_auth_token}@41058 tag=\\"file\\" tag=\\"TLS\\"] %msg%\\n"'
-            echo '#RsyslogGnuTLS'
-            echo '$DefaultNetstreamDriverCAFile /etc/rsyslog.d/keys/ca.d/loggly_full.crt'
-            echo '$ActionSendStreamDriver gtls'
-            echo '$ActionSendStreamDriverMode 1'
-            echo '$ActionSendStreamDriverAuthMode x509/name'
-            echo '$ActionSendStreamDriverPermittedPeer *.loggly.com'
-            echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then \
-@@logs-01.loggly.com:6514;LogglyFormatFile{application_name}-{application_version}'
-            echo 'if $programname == '\\''{application_name}-{application_version}'\\'' then stop'
-        ) > $f
-
-
-
-        service rsyslog restart
-        ''').format(application_name=application_name,
-                    application_version=application_version,
-                    loggly_auth_token=data['loggly_auth_token'])
-
-
-def extract_repository_and_tag(repo_name: str):
-    """
-    >>> extract_repository_and_tag('foo/bar:1.0')
-    ('foo/bar', '1.0')
-    """
-    splits = repo_name.split(':')
-    if len(splits) == 2:
-        return (splits[0], splits[1])
-    else:
-        return (repo_name, '')
-
-
-def is_tag_valid(extracted):
-    """
-    >>> is_tag_valid(('', ))
-    False
-    >>> is_tag_valid(('foo/bar', '1.0'))
-    True
-    """
-    re_tag = re.compile('[a-zA-Z0-9-_.]+')
-
-    if len(extracted) > 1:
-        return re_tag.match(extracted[1]) is not None
-    else:
-        return False
-
-
-def is_docker_image_valid(docker_image: str):
-    """
-    >>> is_docker_image_valid('nginx')
-    False
-
-    >>> is_docker_image_valid('nginx:latest')
-    True
-
-    >>> is_docker_image_valid('foo/bar:1.0')
-    True
-
-    >>> is_docker_image_valid('foo.bar.example.com:2195/namespace/my_repo:1.0')
-    True
-    """
-    parts = docker_image.split('/')
-    number_of_parts = len(parts)
-    extracted = extract_repository_and_tag(parts[number_of_parts - 1])
-
-    is_valid_tag = is_tag_valid(extracted)
-    if not is_valid_tag:
-        return False
-
-    re_namespace = re.compile('[a-z0-9_]+')
-    re_repo_name = re.compile('[a-zA-Z0-9-_.]+')
-
-    extracted_repo_part = extracted[0]
-
-    if number_of_parts == 1:
-        # only repository name was specified
-        return re_repo_name.match(extracted_repo_part) is not None
-    elif number_of_parts == 2:
-        # namspace and repository were specifed (e.g. namespace/my_repo:1.0)
-        is_namespace_valid = re_namespace.match(parts[0]) is not None
-        is_repo_valid = re_repo_name.match(extracted_repo_part) is not None
-        return is_repo_valid and is_namespace_valid
-    elif number_of_parts == 3:
-        # private registry, namspace and repository were specified
-        # (e.g. foo.bar.example.com:2195/namespace/my_repo:1.0)
-        re_registry = re.compile("^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*" +
-                                 "([A-Za-z]|[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9])(\:[0-9]+)?$")
-        re_registry_ip = re.compile("^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}" +
-                                    "([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\:[0-9]+)?$")
-
-        is_registry_valid = re_registry.match(parts[0]) is not None
-        if not is_registry_valid:
-            is_registry_valid = re_registry_ip.match(parts[0]) is not None
-
-        is_namespace_valid = re_namespace.match(parts[1]) is not None
-        is_repo_valid = re_repo_name.match(extracted_repo_part) is not None
-
-        return is_registry_valid and is_namespace_valid and is_repo_valid
-    else:
-        return False
-
-
 def print_remote_file(instance, application, remote_file_path: str):
     """
     Prints out the given file located on the specified instance.
@@ -879,13 +677,37 @@ def print_remote_file(instance, application, remote_file_path: str):
               .format(remote_file_path, instance.name, status, stderr))
 
 
+def map_subnets(subnets: list, route_tables: list) -> dict:
+    """
+    Map VPC subnets to layers
+    """
+    subnet_has_internet_gateway = {}
+    for table in route_tables:
+        has_internet_gateway = False
+        for route in table.routes:
+            if route.gateway_id and route.gateway_id.startswith('igw-'):
+                has_internet_gateway = True
+        for assoc in table.associations:
+            subnet_has_internet_gateway[assoc.subnet_id] = has_internet_gateway
+    by_layer = {'public': [], 'shared': [], 'private': []}
+    for subnet in subnets:
+        layer = 'private'
+        if subnet_has_internet_gateway.get(subnet.id):
+            layer = 'public'
+        elif 'shared' in subnet.tags.get('Name').lower():
+            layer = 'shared'
+        by_layer[layer].append(subnet)
+    return by_layer
+
+
 @versions.command('create')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
+@click.option('--public', is_flag=True, help='Launch instances in public subnet')
 @click.pass_context
-def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list):
+def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, public: bool):
     """
     Create a new application version
     """
@@ -899,8 +721,20 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
+    route_tables = vpc_conn.get_all_route_tables()
+    subnets_by_layer = map_subnets(subnets, route_tables)
 
-    # TODO: map subnets to layers (public, shared, private)
+    # TODO: create ELB in "shared" subnet
+    elb_layer = 'public'
+    # launch instances in private subnets by default
+    instance_layer = 'public' if public else 'private'
+
+    if not subnets_by_layer['public']:
+        raise Exception('No public subnet available in VPC {}.'.format(vpc))
+
+    if not subnets_by_layer['private']:
+        warning('No private subnet available, using public subnet(s) for instances.')
+        instance_layer = 'public'
 
     app = ctx.obj.get_application(application_name)
     sg, manifest = app.security_group, app.manifest
@@ -942,8 +776,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
-    # TODO: launch instances in private subnets
-    vpc_info = ','.join([subnet.id for subnet in subnets])
+    vpc_info = ','.join([subnet.id for subnet in subnets_by_layer[instance_layer]])
 
     with Action('Creating launch configuration for {application_name} version {application_version}..', **vars()):
         lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
@@ -976,9 +809,9 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         else:
             ports = [(80, manifest['exposed_ports'][0], 'http')]
         elb_conn = boto.ec2.elb.connect_to_region(region)
-        # TODO: create ELB in "shared" subnet
         lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
-                                           subnets=[subnet.id for subnet in subnets], security_groups=[lb_sg.id])
+                                           subnets=[subnet.id for subnet in subnets_by_layer[elb_layer]],
+                                           security_groups=[lb_sg.id])
         lb.configure_health_check(hc)
 
     group_name = 'app-{}-{}'.format(application_name, application_version)
@@ -986,7 +819,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     action('Creating auto scaling group for {application_name} version {application_version}..', **vars())
     ag = AutoScalingGroup(group_name=group_name,
                           load_balancers=[dns_name],
-                          availability_zones=[subnet.availability_zone for subnet in subnets],
+                          availability_zones=[subnet.availability_zone for subnet in subnets_by_layer[instance_layer]],
                           launch_config=lc, min_size=0, max_size=8,
                           vpc_zone_identifier=vpc_info,
                           connection=autoscale)
@@ -1178,47 +1011,6 @@ def delete(ctx, application_name: str):
         lb_sg.delete()
 
 
-def send_request_to_loggly(ctx, request: str):
-    app_config = ctx.obj.config
-
-    if 'loggly_user' not in app_config:
-        error('No Loggly credentials configured. Please set them via `app configure`')
-
-    response = requests.get(request, auth=(app_config['loggly_user'], app_config['loggly_password']))
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        error('Request "{}" failed with status code {}'.format(request, response.status_code))
-        return None
-
-
-def request_loggly_logs(ctx, account: str, app_identifier: str, start: str, until: str, size):
-    # request search and obtain rsid
-    request = LOGGLY_SEARCH_REQUEST_TEMPLATE.format(account=account,
-                                                    app_identifier=app_identifier,
-                                                    start=start,
-                                                    until=until,
-                                                    size=size)
-    response_in_json = send_request_to_loggly(ctx, request)
-    if not response_in_json:
-        return None
-
-    rsid = response_in_json['rsid']['id']
-
-    # obtain log data fetched by foregoing search request
-    request = LOGGLY_EVENTS_REQUEST_TEMPLATE.format(account=account, rsid=rsid)
-    return send_request_to_loggly(ctx, request)
-
-
-def print_if_app_log(event):
-    event_data = event['event']
-    if 'json' in event_data:
-        event_data = event_data['json']
-        if 'log' in event_data:
-            click.echo(event_data['log'], nl=False)
-
-
 @versions.command('logs')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
@@ -1246,6 +1038,9 @@ def show_version_logs(ctx, application_name: str, application_version, start, un
 @click.argument('remote-file-path')
 @click.pass_context
 def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
+    """
+    Print contents of one remote file on a give instance
+    """
     instance = ctx.obj.get_instance_by_id(instance_id)
     if instance is None:
         error('Could not find instance with id "{}"'.format(instance_id))
@@ -1426,8 +1221,20 @@ def tail_version_logs(ctx, application_name: str, application_version, start, lo
         time.sleep(1)
 
 
+def is_credentials_expired_error(e: BotoServerError) -> bool:
+    return (e.status == 400 and 'request has expired' in e.message.lower()) or \
+           (e.status == 403 and 'security token included in the request is expired' in e.message.lower())
+
+
 def main():
-    cli()
+    try:
+        cli()
+    except BotoServerError as e:
+        if is_credentials_expired_error(e):
+            sys.stderr.write('AWS credentials have expired. Use "minion login" to get a new temporary access key.\n')
+            sys.exit(1)
+        else:
+            raise
 
 
 if __name__ == '__main__':
