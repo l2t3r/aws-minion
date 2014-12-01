@@ -695,8 +695,9 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
 @click.argument('application-version', callback=validate_application_version)
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
+@click.option('--public', is_flag=True, help='Launch instances in public subnet')
 @click.pass_context
-def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list):
+def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, public: bool):
     """
     Create a new application version
     """
@@ -716,7 +717,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     # TODO: create ELB in "shared" subnet
     elb_layer = 'public'
     # launch instances in private subnets by default
-    instance_layer = 'private'
+    instance_layer = 'public' if public else 'private'
 
     if not subnets_by_layer['public']:
         raise Exception('No public subnet available in VPC {}.'.format(vpc))
