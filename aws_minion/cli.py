@@ -4,7 +4,6 @@ import shlex
 from textwrap import dedent
 import collections
 import os
-import random
 import time
 import datetime
 import re
@@ -112,16 +111,6 @@ class AliasedGroup(click.Group):
         elif len(matches) == 1:
             return click.Group.get_command(self, ctx, matches[0])
         ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
-
-
-def generate_random_name(prefix: str, size: int) -> str:
-    """
-    See GenerateRandomName in vendor/src/github.com/docker/libcontainer/utils/utils.go
-
-    >>> len(generate_random_name('abc', 4))
-    7
-    """
-    return '{}%0{}x'.format(prefix, size) % random.randrange(16 ** size)
 
 
 def modify_sg(c, group, rule, authorize=False, revoke=False):
