@@ -417,7 +417,9 @@ def get_weights(dns_name: str, identifier: str, rr: ResourceRecordSets) -> ({str
             else:
                 w = 0
             known_record_weights[r.identifier] = w
-            if r.identifier != identifier:
+            if r.identifier != identifier and w > 0:
+                # we should ignore all versions that do not get any traffic
+                # not to put traffic on the disabled versions when redistributing traffic weights
                 partial_sum += w
                 partial_count += 1
     if identifier not in known_record_weights:
@@ -440,7 +442,7 @@ def calculate_new_weights(delta, identifier, known_record_weights, percentage):
                     # do not allow it to be pushed below 1
                     n = int(max(1, w + delta))
                 else:
-                    # this should not happen, but just in case
+                    # do not touch versions that had been getting traffic before
                     n = 0
         new_record_weights[i] = n
     return new_record_weights
@@ -450,7 +452,8 @@ def compensate(calculation_error, compensations, identifier, new_record_weights,
                percentage, identifier_versions):
     """
     Compensate for the rounding errors as well as for the fact, that we do not allow to bring down the minimal weights
-    lower then minimal possible value not to disable traffic from the minimally configured versions (1).
+    lower then minimal possible value not to disable traffic from the minimally configured versions (1) and
+    we do not allow to add any values to the already disabled versions (0).
     """
     forced_delta = None
     # distribute the error on the versions, other then the current one
@@ -552,7 +555,7 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
             'version': str(identifier_versions[i]),
             'identifier': i,
             'old_weight': known_record_weights[i] / PERCENT_RESOLUTION,
-            'delta': delta / PERCENT_RESOLUTION if i != identifier else forced_delta,
+            'delta': (delta if new_record_weights[i] else 0 if i != identifier else forced_delta)/PERCENT_RESOLUTION,
             'compensation': compensations[i] / PERCENT_RESOLUTION if i in compensations else None,
             'new_weight': new_record_weights[i] / PERCENT_RESOLUTION,
         } for i in known_record_weights.keys()
