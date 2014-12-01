@@ -3,13 +3,11 @@ import pytest
 from unittest.mock import MagicMock
 from click.testing import CliRunner
 import yaml
-from aws_minion.cli import cli
+from aws_minion.cli import cli, map_subnets
 from aws_minion.context import Context, ApplicationVersion, Application
 
 
 def test_list_versions(monkeypatch):
-
-
     auto_scaling_group = MagicMock()
     auto_scaling_group.tags = [MagicMock(key='DockerImage', value='foo/bar:123')]
     auto_scaling_group.desired_capacity = 3
@@ -76,3 +74,8 @@ def test_create_version(monkeypatch):
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'create', 'myapp', '1.0', 'mydocker:2.3', '-e', 'MY_ENV_VAR=123'], catch_exceptions=False)
 
     assert 'ABORTED. Default health check time to wait for members to become active has been exceeded.' in result.output
+
+
+def test_map_subnets_empty():
+    res = map_subnets([], [])
+    assert res == {'public': [], 'shared': [], 'private': []}
