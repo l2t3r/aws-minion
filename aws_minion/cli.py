@@ -28,7 +28,7 @@ import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 
-from aws_minion.console import print_table, action, ok, error, warning, choice, Action
+from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.docker import is_docker_image_valid, generate_env_options
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
@@ -94,20 +94,6 @@ def validate_vpc_id(ctx, param, value):
     if not match:
         raise click.BadParameter('invalid VPC ID (allowed: {})'.format(VPC_ID_PATTERN.pattern))
     return value
-
-
-class AliasedGroup(click.Group):
-    def get_command(self, ctx, cmd_name):
-        rv = click.Group.get_command(self, ctx, cmd_name)
-        if rv is not None:
-            return rv
-        matches = [x for x in self.list_commands(ctx)
-                   if x.startswith(cmd_name)]
-        if not matches:
-            return None
-        elif len(matches) == 1:
-            return click.Group.get_command(self, ctx, matches[0])
-        ctx.fail('Too many matches: %s' % ', '.join(sorted(matches)))
 
 
 def modify_sg(c, group, rule, authorize=False, revoke=False):
@@ -1039,6 +1025,9 @@ def show_version_logs(ctx, application_name: str, application_version, start, un
 @click.argument('remote-file-path')
 @click.pass_context
 def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
+    """
+    Print contents of one remote file on a give instance
+    """
     instance = ctx.obj.get_instance_by_id(instance_id)
     if instance is None:
         error('Could not find instance with id "{}"'.format(instance_id))
