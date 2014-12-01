@@ -161,12 +161,13 @@ class Context:
         dns_conn = boto.route53.connect_to_region(self.region)
         zone = dns_conn.get_zone(self.domain + '.')
 
-        rr = zone.get_records()
-
         weights = {}
-        for r in rr:
-            if r.type == 'CNAME' and r.identifier and r.weight:
-                weights[r.identifier] = int(r.weight)
+        if zone:
+            rr = zone.get_records()
+
+            for r in rr:
+                if r.type == 'CNAME' and r.identifier and r.weight:
+                    weights[r.identifier] = int(r.weight)
 
         for group in groups:
             if group.name.startswith(IDENTIFIER_PREFIX):
