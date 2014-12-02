@@ -38,6 +38,7 @@ def get_role_label(role):
 
 def get_roles(saml_xml: str) -> list:
     """
+    Extract SAML roles from SAML assertion XML
 
     >>> get_roles('''<xml xmlns="urn:oasis:names:tc:SAML:2.0:assertion"><Assertion>
     ... <Attribute FriendlyName="Role" Name="https://aws.amazon.com/SAML/Attributes/Role">
