@@ -372,12 +372,14 @@ def instances(ctx):
                          'application_version': application_version,
                          'instance_id': instance.id,
                          'team': instance.tags.get('Team', ''),
-                         'ip_address': instance.ip_address,
+                         'public_ip': instance.ip_address,
+                         'private_ip': instance.private_ip_address,
                          'state': instance.state.upper(),
                          'launch_time': parse_time(instance.launch_time)})
         now = time.time()
         rows.sort(key=lambda x: (x['application_name'], LooseVersion(x['application_version']), now - x['launch_time']))
-        print_table('application_name application_version instance_id team ip_address state launch_time'.split(), rows)
+        print_table(('application_name application_version instance_id team '
+                    + 'public_ip private_ip state launch_time').split(), rows)
 
 
 def get_weights(dns_name: str, identifier: str, rr: ResourceRecordSets) -> ({str: int}, int, int):
