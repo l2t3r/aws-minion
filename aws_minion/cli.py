@@ -410,6 +410,7 @@ def get_weights(dns_name: str, identifier: str, rr: ResourceRecordSets) -> ({str
 
 def calculate_new_weights(delta, identifier, known_record_weights, percentage):
     new_record_weights = {}
+    deltas = {}
     for i, w in known_record_weights.items():
         if i == identifier:
             n = percentage
@@ -423,10 +424,11 @@ def calculate_new_weights(delta, identifier, known_record_weights, percentage):
                     # do not allow it to be pushed below 1
                     n = int(max(1, w + delta))
                 else:
-                    # do not touch versions that had been getting traffic before
+                    # do not touch versions that had not been getting traffic before
                     n = 0
         new_record_weights[i] = n
-    return new_record_weights
+        deltas[i] = n - known_record_weights[i]
+    return new_record_weights, deltas
 
 
 def compensate(calculation_error, compensations, identifier, new_record_weights, partial_count,
@@ -436,7 +438,6 @@ def compensate(calculation_error, compensations, identifier, new_record_weights,
     lower then minimal possible value not to disable traffic from the minimally configured versions (1) and
     we do not allow to add any values to the already disabled versions (0).
     """
-    forced_delta = None
     # distribute the error on the versions, other then the current one
     part = calculation_error / partial_count
     if part > 0:
@@ -458,7 +459,7 @@ def compensate(calculation_error, compensations, identifier, new_record_weights,
             break
     if calculation_error != 0:
         adjusted_percentage = percentage + calculation_error
-        forced_delta = calculation_error
+        compensations[identifier] = calculation_error
         calculation_error = 0
         warning(
             ("Changing given percentage from {} to {} " +
@@ -467,7 +468,7 @@ def compensate(calculation_error, compensations, identifier, new_record_weights,
         percentage = adjusted_percentage
         new_record_weights[identifier] = percentage
     assert calculation_error == 0
-    return forced_delta, percentage
+    return percentage
 
 
 def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr):
@@ -492,6 +493,48 @@ def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr
         ok()
     else:
         ok(' not changed')
+
+
+def dump_traffic_changes(application_name: str,
+                         identifier: str,
+                         identifier_versions: {str: LooseVersion},
+                         known_record_weights: {str: int},
+                         new_record_weights: {str: int},
+                         compensations: {str: int},
+                         deltas: {str: int}
+                         ):
+    """
+    dump changes to the traffic settings for the given versions
+    """
+    rows = [
+        {
+            'application_name': application_name,
+            'version': str(identifier_versions[i]),
+            'identifier': i,
+            'old_weight': known_record_weights[i],
+            # 'delta': (delta if new_record_weights[i] else 0 if i != identifier else forced_delta),
+            'delta': deltas[i],
+            'compensation': compensations.get(i),
+            'new_weight': new_record_weights[i],
+        } for i in known_record_weights.keys()
+    ]
+
+    full_switch = max(new_record_weights.values()) == FULL_PERCENTAGE
+
+    for r in rows:
+        d = r['delta']
+        c = r['compensation']
+        if full_switch and not d and c:
+            d = -c
+        r['delta'] = (d / PERCENT_RESOLUTION) if d else None
+        r['old_weight'] /= PERCENT_RESOLUTION
+        r['new_weight'] /= PERCENT_RESOLUTION
+        r['compensation'] = (c / PERCENT_RESOLUTION) if c else None
+        if identifier == r['identifier']:
+            r['current'] = '<'
+
+    print_table('application_name version identifier old_weight delta compensation new_weight current'.split(),
+                sorted(rows, key=lambda x: identifier_versions[x['identifier']]))
 
 
 def change_version_traffic(application_name: str, application_version: str, ctx: Context, percentage: float):
@@ -523,26 +566,19 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
             delta = 0
             compensations[identifier] = FULL_PERCENTAGE - percentage
             percentage = int(FULL_PERCENTAGE)
-        new_record_weights = calculate_new_weights(delta, identifier, known_record_weights, percentage)
+        new_record_weights, deltas = calculate_new_weights(delta, identifier, known_record_weights, percentage)
         total_weight = sum(new_record_weights.values())
         calculation_error = FULL_PERCENTAGE - total_weight
-        forced_delta = None
         if calculation_error:
-            forced_delta, percentage = compensate(calculation_error, compensations, identifier,
-                                                  new_record_weights, partial_count, percentage, identifier_versions)
-    rows = [
-        {
-            'application_name': application_name,
-            'version': str(identifier_versions[i]),
-            'identifier': i,
-            'old_weight': known_record_weights[i] / PERCENT_RESOLUTION,
-            'delta': (delta if new_record_weights[i] else 0 if i != identifier else forced_delta)/PERCENT_RESOLUTION,
-            'compensation': compensations[i] / PERCENT_RESOLUTION if i in compensations else None,
-            'new_weight': new_record_weights[i] / PERCENT_RESOLUTION,
-        } for i in known_record_weights.keys()
-    ]
-    print_table('application_name version identifier old_weight delta compensation new_weight'.split(),
-                sorted(rows, key=lambda x: identifier_versions[x['identifier']]))
+            percentage = compensate(calculation_error, compensations, identifier,
+                                    new_record_weights, partial_count, percentage, identifier_versions)
+    dump_traffic_changes(application_name,
+                         identifier,
+                         identifier_versions,
+                         known_record_weights,
+                         new_record_weights,
+                         compensations,
+                         deltas)
     assert sum(new_record_weights.values()) == FULL_PERCENTAGE
     set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr)
 

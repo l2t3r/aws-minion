@@ -170,4 +170,58 @@ def test_versions_traffic(monkeypatch):
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '3.0', '10'],
                                catch_exceptions=False)
         # print(result.output)
-        # oh, we found an error, cool :)
+        ri = iter(rr)
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0
+        assert next(ri).weight == 20
+        assert next(ri).weight == 180
+
+        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '2.0', '0.5'],
+                               catch_exceptions=False)
+        # print(result.output)
+        ri = iter(rr)
+        assert next(ri).weight == 0
+        assert next(ri).weight == 1
+        assert next(ri).weight == 20
+        assert next(ri).weight == 179
+
+        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '1.0', '1'],
+                               catch_exceptions=False)
+        # print(result.output)
+        ri = iter(rr)
+        assert next(ri).weight == 2
+        assert next(ri).weight == 1
+        assert next(ri).weight == 19
+        assert next(ri).weight == 178
+
+        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '95'],
+                               catch_exceptions=False)
+        # print(result.output)
+        ri = iter(rr)
+        assert next(ri).weight == 1
+        assert next(ri).weight == 1
+        assert next(ri).weight == 13
+        assert next(ri).weight == 185
+
+        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '100'],
+                               catch_exceptions=False)
+        # print(result.output)
+        ri = iter(rr)
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0
+        assert next(ri).weight == 200
+
+        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '10'],
+                               catch_exceptions=False)
+        # print(result.output)
+        ri = iter(rr)
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0
+        assert next(ri).weight == 200
+
+        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '0'],
+                               catch_exceptions=False)
+        # print(result.output)
+        # this should actually disable all the traffic. not implemented yet
