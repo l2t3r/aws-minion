@@ -4,7 +4,6 @@ import shlex
 import collections
 import os
 import time
-import datetime
 import re
 from boto.route53.record import ResourceRecordSets
 from boto.exception import BotoServerError
@@ -24,7 +23,7 @@ import sys
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
-from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials
+from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_time
 
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound
@@ -302,14 +301,6 @@ def applications(ctx):
 
 
 PREFIX = 'app-'
-
-
-def parse_time(s: str) -> float:
-    try:
-        utc = datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()
-        return utc - time.timezone
-    except:
-        return None
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)

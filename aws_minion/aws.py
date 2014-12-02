@@ -1,8 +1,17 @@
 import datetime
 import os
+import time
 from textwrap import dedent
 
 AWS_CREDENTIALS_PATH = '~/.aws/credentials'
+
+
+def parse_time(s: str) -> float:
+    try:
+        utc = datetime.datetime.strptime(s, '%Y-%m-%dT%H:%M:%S.%fZ').timestamp()
+        return utc - time.timezone
+    except:
+        return None
 
 
 def write_aws_credentials(key_id, secret, session_token=None):
