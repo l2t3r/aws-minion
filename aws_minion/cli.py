@@ -691,6 +691,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     region = ctx.obj.region
     vpc = ctx.obj.vpc
+    domain = ctx.obj.domain
 
     vpc_conn = boto.vpc.connect_to_region(region)
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
@@ -722,6 +723,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     log_shipper_script = prepare_log_shipper_script(application_name, application_version, ctx.obj.config)
 
     dns_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
+    fqdn = '{}-{}.{}'.format(application_name, application_version.replace('.', '-'), domain)
 
     init_script = '''#!/bin/bash
     iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
@@ -821,6 +823,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     ok()
 
     click.secho('DNS name of load balancer is {}'.format(lb.dns_name), fg='blue', bold=True)
+
+    with Action('Configuring DNS name {fqdn} ..', fqdn=fqdn):
+        dns_conn = boto.route53.connect_to_region(region)
+        zone = dns_conn.get_zone(ctx.obj.domain + '.')
+        rr = zone.get_records()
+        change = rr.add_change('UPSERT', fqdn.split('.')[0], 'CNAME', ttl=60)
+        change.add_value(lb.dns_name)
+        rr.commit()
 
     with Action('Waiting for instance start and LB..') as act:
         lb = elb_conn.get_all_load_balancers(load_balancer_names=[lb.name])[0]

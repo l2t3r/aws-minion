@@ -39,6 +39,7 @@ def test_versions_create(monkeypatch):
 
     monkeypatch.setattr('boto.vpc.connect_to_region', vpc_conn)
     monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.route53.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.elb.connect_to_region', MagicMock())
     monkeypatch.setattr('time.sleep', lambda s: s)
@@ -58,7 +59,7 @@ def test_versions_create(monkeypatch):
     version = ApplicationVersion('myregion', 'myapp', '1.0', auto_scaling_group)
     version.weight = 120
 
-    context = Context({'region': 'caprica', 'vpc': 'myvpc', 'loggly_auth_token': 'abc'})
+    context = Context({'region': 'caprica', 'vpc': 'myvpc', 'loggly_auth_token': 'abc', 'domain': 'mydomain'})
     context.get_versions = lambda: [version]
     context.get_application = lambda x: app
     context.get_security_group = lambda x: security_groups.get(x)
