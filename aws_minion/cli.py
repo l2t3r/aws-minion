@@ -776,6 +776,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
     iid=${{iid/i-}}
     hostname {hostname}-$iid
+    IP=$(ip -o -4 a show eth0 | awk '{{ print $4 }}' | cut -d/ -f 1)
+    echo $IP $(hostname) >> /etc/hosts
 
     # add Docker repo
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
@@ -783,8 +785,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     apt-get update
 
-    # Docker
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker rsyslog-gnutls
+    adduser ubuntu docker
 
     containerId=$(docker run -d {env_options} --net=host {docker_image})
 
