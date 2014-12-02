@@ -23,6 +23,7 @@ import sys
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
+import aws_minion
 from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_time
 
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
@@ -112,9 +113,17 @@ def modify_sg(c, group, rule, authorize=False, revoke=False):
                      src_group=src_group)
 
 
+def print_version(ctx, param, value):
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo('AWS Minion {}'.format(aws_minion.__version__))
+    ctx.exit()
+
+
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
 @click.option('--config-file', '-c', help='Use alternative configuration file', default=CONFIG_FILE_PATH)
 @click.option('--profile', '-p', help='Configuration profile to use', default='default', envvar='AWS_MINION_PROFILE')
+@click.option('-V', '--version', is_flag=True, callback=print_version, expose_value=False, is_eager=True)
 @click.pass_context
 def cli(ctx, config_file, profile):
     path = os.path.expanduser(config_file)
@@ -828,7 +837,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         dns_conn = boto.route53.connect_to_region(region)
         zone = dns_conn.get_zone(ctx.obj.domain + '.')
         rr = zone.get_records()
-        change = rr.add_change('UPSERT', fqdn.split('.')[0], 'CNAME', ttl=60)
+        change = rr.add_change('UPSERT', fqdn, 'CNAME', ttl=60)
         change.add_value(lb.dns_name)
         rr.commit()
 

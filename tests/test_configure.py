@@ -6,6 +6,16 @@ from click.testing import CliRunner
 from aws_minion.cli import cli
 
 
+def test_print_version(monkeypatch):
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ['--version'], catch_exceptions=False)
+
+    assert 'AWS Minion' in result.output
+    assert result.exit_code == 0
+
+
 def test_configure(monkeypatch):
 
     monkeypatch.setattr('aws_minion.cli.AWS_CREDENTIALS_PATH', 'aws-credentials')
