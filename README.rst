@@ -67,8 +67,8 @@ Running Unit Tests
 
 .. code-block:: bash
 
-    $ python3 setup.py test   # run unit tests
-    $ python3 setup.py flake8 # check code formatting
+    $ python3 setup.py test --cov-html=yes  # run unit tests
+    $ python3 setup.py flake8               # check code formatting
 
 
 Documentation

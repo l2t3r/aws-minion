@@ -39,8 +39,12 @@ def get_role_label(role):
 def get_roles(saml_xml: str) -> list:
     """
 
-    >>> get_roles('<xml xmlns="urn:oasis:names:tc:SAML:2.0:assertion"><Assertion></Assertion></xml>')
-    []
+    >>> get_roles('''<xml xmlns="urn:oasis:names:tc:SAML:2.0:assertion"><Assertion>
+    ... <Attribute FriendlyName="Role" Name="https://aws.amazon.com/SAML/Attributes/Role">
+    ... <AttributeValue>arn:aws:iam::911:saml-provider/Shibboleth,arn:aws:iam::911:role/Shibboleth-User</AttributeValue>
+    ... </Attribute>
+    ... </Assertion></xml>''')
+    [('arn:aws:iam::911:saml-provider/Shibboleth', 'arn:aws:iam::911:role/Shibboleth-User')]
     """
     tree = ElementTree.fromstring(saml_xml)
 
