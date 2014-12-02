@@ -159,7 +159,7 @@ def test_versions_traffic(monkeypatch):
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '100'],
                                catch_exceptions=False)
 
-        print(result.output)
+        # print(result.output)
         ri = iter(rr)
         assert next(ri).weight == 0
         assert next(ri).weight == 0
@@ -168,5 +168,5 @@ def test_versions_traffic(monkeypatch):
 
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '3.0', '10'],
                                catch_exceptions=False)
-        print(result.output)
+        # print(result.output)
         # oh, we found an error, cool :)
