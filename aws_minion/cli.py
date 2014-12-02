@@ -882,6 +882,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
             ok()
     else:
         ok()
+        click.secho('Application version URL is http{}://{}'.format('s' if ssl_cert_arn else '', fqdn),
+                    fg='blue', bold=True)
 
 
 @applications.command()
