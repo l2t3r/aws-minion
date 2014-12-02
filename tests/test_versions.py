@@ -157,6 +157,7 @@ def test_versions_traffic(monkeypatch):
 
     with runner.isolated_filesystem():
         context.write_config('config.yaml')
+
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '100'],
                                catch_exceptions=False)
 
@@ -224,4 +225,8 @@ def test_versions_traffic(monkeypatch):
         result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '0'],
                                catch_exceptions=False)
         # print(result.output)
-        # this should actually disable all the traffic. not implemented yet
+        ri = iter(rr)
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0
+        assert next(ri).weight == 0

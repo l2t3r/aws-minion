@@ -439,6 +439,7 @@ def compensate(calculation_error, compensations, identifier, new_record_weights,
     we do not allow to add any values to the already disabled versions (0).
     """
     # distribute the error on the versions, other then the current one
+    assert partial_count
     part = calculation_error / partial_count
     if part > 0:
         part = int(max(1, part))
@@ -490,7 +491,10 @@ def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr
         change.add_value(lb.dns_name)
     if rr.changes:
         rr.commit()
-        ok()
+        if sum(new_record_weights.values()) == 0:
+            ok(' DISABLED')
+        else:
+            ok()
     else:
         ok(' not changed')
 
@@ -558,28 +562,36 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     rr = zone.get_records()
     percentage = int(percentage * PERCENT_RESOLUTION)
     known_record_weights, partial_count, partial_sum = get_weights(dns_name, identifier, rr)
-    with Action('Calculating new weights..'):
-        compensations = {}
-        if partial_count:
-            delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
-        else:
-            delta = 0
-            compensations[identifier] = FULL_PERCENTAGE - percentage
-            percentage = int(FULL_PERCENTAGE)
-        new_record_weights, deltas = calculate_new_weights(delta, identifier, known_record_weights, percentage)
-        total_weight = sum(new_record_weights.values())
-        calculation_error = FULL_PERCENTAGE - total_weight
-        if calculation_error:
-            percentage = compensate(calculation_error, compensations, identifier,
-                                    new_record_weights, partial_count, percentage, identifier_versions)
-    dump_traffic_changes(application_name,
-                         identifier,
-                         identifier_versions,
-                         known_record_weights,
-                         new_record_weights,
-                         compensations,
-                         deltas)
-    assert sum(new_record_weights.values()) == FULL_PERCENTAGE
+
+    if partial_count == 0 and percentage == 0:
+        # disable the last remaining version
+        new_record_weights = {i: 0 for i in known_record_weights.keys()}
+        ok(msg='DNS record "{dns_name}" will be removed from that application'.format(**vars()))
+    else:
+        with Action('Calculating new weights..'):
+            compensations = {}
+            if partial_count:
+                delta = int((FULL_PERCENTAGE - percentage - partial_sum) / partial_count)
+            else:
+                delta = 0
+                if percentage > 0:
+                    # will put the only last version to full traffic percentage
+                    compensations[identifier] = FULL_PERCENTAGE - percentage
+                    percentage = int(FULL_PERCENTAGE)
+            new_record_weights, deltas = calculate_new_weights(delta, identifier, known_record_weights, percentage)
+            total_weight = sum(new_record_weights.values())
+            calculation_error = FULL_PERCENTAGE - total_weight
+            if calculation_error and calculation_error < FULL_PERCENTAGE:
+                percentage = compensate(calculation_error, compensations, identifier,
+                                        new_record_weights, partial_count, percentage, identifier_versions)
+            dump_traffic_changes(application_name,
+                                 identifier,
+                                 identifier_versions,
+                                 known_record_weights,
+                                 new_record_weights,
+                                 compensations,
+                                 deltas)
+            assert sum(new_record_weights.values()) == FULL_PERCENTAGE
     set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr)
 
 
