@@ -739,7 +739,7 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
 @click.argument('application-version', callback=validate_application_version)
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
-@click.option('--public', is_flag=True, help='Launch instances in public subnet')
+@click.option('--public', is_flag=True, help='Launch instances and ELB in public subnet')
 @click.pass_context
 def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, public: bool):
     """
@@ -760,15 +760,19 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     subnets_by_layer = map_subnets(subnets, route_tables)
     vpc_config = ctx.obj.get_vpc_config()
 
-    # TODO: create ELB in "shared" subnet
-    elb_layer = 'public'
+    # create ELB in "shared" subnet by default
+    elb_layer = 'public' if public else 'shared'
     # launch instances in private subnets by default
     instance_layer = 'public' if public else 'private'
 
     if not subnets_by_layer['public']:
         raise Exception('No public subnet available in VPC {}.'.format(vpc))
 
-    if not subnets_by_layer['private']:
+    if not subnets_by_layer[elb_layer]:
+        warning('No shared subnet available, using public subnet(s) for ELB.')
+        elb_layer = 'public'
+
+    if not subnets_by_layer[instance_layer]:
         warning('No private subnet available, using public subnet(s) for instances.')
         instance_layer = 'public'
 
@@ -820,6 +824,10 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker rsyslog-gnutls
     adduser ubuntu docker
 
+    until docker pull {docker_image}; do
+        echo 'Docker pull failed, retrying..'
+        sleep 3
+    done
     containerId=$(docker run -d {env_options} --net=host {docker_image})
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
@@ -867,6 +875,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
             ports = [(80, manifest['exposed_ports'][0], 'http')]
         elb_conn = boto.ec2.elb.connect_to_region(region)
         lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
+                                           scheme='internet-facing' if elb_layer == 'public' else 'internal',
                                            subnets=[subnet.id for subnet in subnets_by_layer[elb_layer]],
                                            security_groups=[lb_sg.id])
         lb.configure_health_check(hc)

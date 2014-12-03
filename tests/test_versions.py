@@ -43,7 +43,7 @@ def test_versions_create(monkeypatch):
     monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.elb.connect_to_region', MagicMock())
     monkeypatch.setattr('time.sleep', lambda s: s)
-    monkeypatch.setattr('aws_minion.cli.map_subnets', lambda s, r: {'public': [subnet], 'private': []})
+    monkeypatch.setattr('aws_minion.cli.map_subnets', lambda s, r: {'public': [subnet], 'shared': [], 'private': []})
 
     security_group = MagicMock()
     security_group.tags = {'Manifest': json.dumps({'exposed_ports': [8080], 'team_name': 'MyTeam'})}
