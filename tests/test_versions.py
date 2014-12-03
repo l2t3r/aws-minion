@@ -24,7 +24,7 @@ def test_versions_list(monkeypatch):
 
     with runner.isolated_filesystem():
         context.write_config('config.yaml')
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions'], catch_exceptions=False)
+        result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'versions'], catch_exceptions=False)
 
     lines = result.output.splitlines()
     cols = lines[1].split()
@@ -71,7 +71,7 @@ def test_versions_create(monkeypatch):
 
     with runner.isolated_filesystem():
         context.write_config('config.yaml')
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'create', 'myapp', '1.0',
+        result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'versions', 'create', 'myapp', '1.0',
                                      'mydocker:2.3', '-e', 'MY_ENV_VAR=123'],
                                catch_exceptions=False)
 
@@ -155,76 +155,65 @@ def test_versions_traffic(monkeypatch):
 
     runner = CliRunner()
 
+    common_opts = ['-p', 'default', '--config-file', 'config.yaml', 'versions', 'traffic', 'myapp']
+
+    def run(opts):
+        return runner.invoke(cli, common_opts + opts, catch_exceptions=False)
+
     with runner.isolated_filesystem():
         context.write_config('config.yaml')
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '100'],
-                               catch_exceptions=False)
+        run(['4.0', '100'])
 
-        # print(result.output)
         ri = iter(rr)
         assert next(ri).weight == 0
         assert next(ri).weight == 0
         assert next(ri).weight == 0
         assert next(ri).weight == 200
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '3.0', '10'],
-                               catch_exceptions=False)
-        # print(result.output)
+        run(['3.0', '10'])
         ri = iter(rr)
         assert next(ri).weight == 0
         assert next(ri).weight == 0
         assert next(ri).weight == 20
         assert next(ri).weight == 180
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '2.0', '0.5'],
-                               catch_exceptions=False)
-        # print(result.output)
+        run(['2.0', '0.5'])
         ri = iter(rr)
         assert next(ri).weight == 0
         assert next(ri).weight == 1
         assert next(ri).weight == 20
         assert next(ri).weight == 179
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '1.0', '1'],
-                               catch_exceptions=False)
-        # print(result.output)
+        run(['1.0', '1'])
         ri = iter(rr)
         assert next(ri).weight == 2
         assert next(ri).weight == 1
         assert next(ri).weight == 19
         assert next(ri).weight == 178
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '95'],
-                               catch_exceptions=False)
-        # print(result.output)
+        run(['4.0', '95'])
         ri = iter(rr)
         assert next(ri).weight == 1
         assert next(ri).weight == 1
         assert next(ri).weight == 13
         assert next(ri).weight == 185
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '100'],
-                               catch_exceptions=False)
-        # print(result.output)
+        run(['4.0', '100'])
         ri = iter(rr)
         assert next(ri).weight == 0
         assert next(ri).weight == 0
         assert next(ri).weight == 0
         assert next(ri).weight == 200
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '10'],
-                               catch_exceptions=False)
-        # print(result.output)
+        run(['4.0', '10'])
         ri = iter(rr)
         assert next(ri).weight == 0
         assert next(ri).weight == 0
         assert next(ri).weight == 0
         assert next(ri).weight == 200
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'versions', 'traffic', 'myapp', '4.0', '0'],
-                               catch_exceptions=False)
-        # print(result.output)
+        run(['4.0', '0'])
         ri = iter(rr)
         assert next(ri).weight == 0
         assert next(ri).weight == 0

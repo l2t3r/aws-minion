@@ -34,7 +34,7 @@ def test_create_application(monkeypatch):
 
         context.write_config('config.yaml')
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'applications', 'create', 'myapp.yaml'], catch_exceptions=False)
+        result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'applications', 'create', 'myapp.yaml'], catch_exceptions=False)
 
     assert 'Creating IAM role and instance profile.. OK' in result.output
 
@@ -55,7 +55,7 @@ def test_list_applications(monkeypatch):
     with runner.isolated_filesystem():
         context.write_config('config.yaml')
 
-        result = runner.invoke(cli, ['--config-file', 'config.yaml', 'app'], catch_exceptions=False)
+        result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'app'], catch_exceptions=False)
 
     lines = result.output.splitlines()
     assert lines[1].split() == ['myapp', 'MyTeam', '[123]']

@@ -2,6 +2,12 @@ import re
 import shlex
 
 
+REGISTRY_PATTERN = re.compile("^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*" +
+                              "([A-Za-z]|[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9])(\:[0-9]+)?$")
+REGISTRY_IP_PATTERN = re.compile("^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}" +
+                                 "([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\:[0-9]+)?$")
+
+
 def generate_env_options(env_vars: dict):
     """
     Generate Docker env options (-e) for a given dictionary
@@ -35,7 +41,7 @@ def extract_repository_and_tag(repo_name: str):
         return (repo_name, '')
 
 
-def is_tag_valid(extracted):
+def is_tag_valid(extracted: tuple) -> bool:
     """
     >>> is_tag_valid(('', ))
     False
@@ -50,7 +56,21 @@ def is_tag_valid(extracted):
         return False
 
 
-def is_docker_image_valid(docker_image: str):
+def extract_registry(docker_image: str) -> str:
+    """
+    >>> extract_registry('nginx')
+
+    >>> extract_registry('foo.bar.example.com:2195/namespace/my_repo:1.0')
+    'foo.bar.example.com:2195'
+    """
+
+    parts = docker_image.split('/')
+    if len(parts) == 3:
+        return parts[0]
+    return None
+
+
+def is_docker_image_valid(docker_image: str) -> bool:
     """
     >>> is_docker_image_valid('nginx')
     False
@@ -88,14 +108,9 @@ def is_docker_image_valid(docker_image: str):
     elif number_of_parts == 3:
         # private registry, namspace and repository were specified
         # (e.g. foo.bar.example.com:2195/namespace/my_repo:1.0)
-        re_registry = re.compile("^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*" +
-                                 "([A-Za-z]|[A-Za-z][A-Za-z0-9\-]*[A-Za-z0-9])(\:[0-9]+)?$")
-        re_registry_ip = re.compile("^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}" +
-                                    "([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\:[0-9]+)?$")
-
-        is_registry_valid = re_registry.match(parts[0]) is not None
+        is_registry_valid = REGISTRY_PATTERN.match(parts[0]) is not None
         if not is_registry_valid:
-            is_registry_valid = re_registry_ip.match(parts[0]) is not None
+            is_registry_valid = REGISTRY_IP_PATTERN.match(parts[0]) is not None
 
         is_namespace_valid = re_namespace.match(parts[1]) is not None
         is_repo_valid = re_repo_name.match(extracted_repo_part) is not None
