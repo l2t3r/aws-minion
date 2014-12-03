@@ -584,14 +584,14 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
             if calculation_error and calculation_error < FULL_PERCENTAGE:
                 percentage = compensate(calculation_error, compensations, identifier,
                                         new_record_weights, partial_count, percentage, identifier_versions)
-            dump_traffic_changes(application_name,
-                                 identifier,
-                                 identifier_versions,
-                                 known_record_weights,
-                                 new_record_weights,
-                                 compensations,
-                                 deltas)
             assert sum(new_record_weights.values()) == FULL_PERCENTAGE
+        dump_traffic_changes(application_name,
+                             identifier,
+                             identifier_versions,
+                             known_record_weights,
+                             new_record_weights,
+                             compensations,
+                             deltas)
     set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr)
 
 
@@ -687,7 +687,7 @@ def print_remote_file(instance, application, remote_file_path: str):
     parameters:
 
     instance:         target EC2 instance
-    application:      coressponding application instance
+    application:      corresponding application instance
     remote_file_path: path of the target file on the EC2 instance
     """
     key_file = application.get_key_file_path()
