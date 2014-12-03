@@ -1,6 +1,7 @@
 from distutils.version import LooseVersion
 import boto.ec2
 import boto.iam
+import boto.vpc
 from boto.ec2.elb import LoadBalancer
 import functools
 import yaml
@@ -132,6 +133,21 @@ class Context:
         data.update({self.profile: self.config})
         with open(path, 'w') as fd:
             yaml.dump(data, fd, default_flow_style=False)
+
+    def get_vpc_config(self):
+        """
+        Read VPC configuration from VPC tags
+        """
+        conn = boto.vpc.connect_to_region(self.region)
+        vpc = conn.get_all_vpcs([self.vpc])[0]
+
+        config_yaml = vpc.tags.get('Config')
+        # NOTE: we check that config YAML is a real string to prevent infinite recursion with EasyMock
+        if config_yaml and isinstance(config_yaml, str):
+            config = yaml.safe_load(config_yaml)
+        else:
+            config = {}
+        return config
 
     def get_application(self, application_name: str) -> Application:
         security_group = self.get_security_group(IDENTIFIER_PREFIX + application_name)

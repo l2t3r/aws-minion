@@ -70,6 +70,25 @@ def extract_registry(docker_image: str) -> str:
     return None
 
 
+def replace_registry(docker_image: str, registry: str) -> str:
+    """
+    >>> replace_registry('myrepo/myapp', 'myreg')
+    'myreg/myrepo/myapp'
+
+    >>> replace_registry('somereg/myrepo/myapp', 'myreg')
+    'myreg/myrepo/myapp'
+
+    >>> replace_registry('myreg/myrepo/myapp', 'myreg')
+    'myreg/myrepo/myapp'
+    """
+    parts = docker_image.split('/')
+    if len(parts) >= 3:
+        parts_without_registry = parts[1:]
+    else:
+        parts_without_registry = parts
+    return '/'.join([registry] + parts_without_registry)
+
+
 def is_docker_image_valid(docker_image: str) -> bool:
     """
     >>> is_docker_image_valid('nginx')

@@ -29,7 +29,7 @@ from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_ti
 
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound
-from aws_minion.docker import is_docker_image_valid, generate_env_options, extract_registry
+from aws_minion.docker import is_docker_image_valid, generate_env_options, extract_registry, replace_registry
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
     prepare_log_shipper_script
 from aws_minion.saml import saml_login
@@ -757,6 +757,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     subnets = vpc_conn.get_all_subnets(filters={'vpcId': [vpc]})
     route_tables = vpc_conn.get_all_route_tables()
     subnets_by_layer = map_subnets(subnets, route_tables)
+    vpc_config = ctx.obj.get_vpc_config()
 
     # TODO: create ELB in "shared" subnet
     elb_layer = 'public'
@@ -785,16 +786,18 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     dns_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
     fqdn = '{}-{}.{}'.format(application_name, application_version.replace('.', '-'), domain)
 
-    registry = extract_registry(docker_image)
+    registry = extract_registry(docker_image) or vpc_config.get('registry')
     registry_setup = ''
 
     if registry:
-        registry_hostname = registry.split(':')[0]
-        registry_ip = socket.gethostbyname(registry_hostname)
-        registry_setup = '''
-            echo {registry_ip} {registry_hostname} >> /etc/hosts
-            echo 'DOCKER_OPTS="--insecure-registry {registry_hostname}"' > /etc/default/docker
-            '''.format(registry_ip=registry_ip, registry_hostname=registry_hostname)
+        with Action('Using Docker registry {registry}..', registry=registry):
+            docker_image = replace_registry(docker_image, registry)
+            registry_hostname = registry.split(':')[0]
+            registry_ip = socket.gethostbyname(registry_hostname)
+            registry_setup = '''
+                echo {registry_ip} {registry_hostname} >> /etc/hosts
+                echo 'DOCKER_OPTS="--insecure-registry {registry_hostname}"' > /etc/default/docker
+                '''.format(registry_ip=registry_ip, registry_hostname=registry_hostname)
 
     init_script = '''#!/bin/bash
     iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
