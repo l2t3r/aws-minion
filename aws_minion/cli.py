@@ -697,6 +697,8 @@ def print_remote_file(instance, application, remote_file_path: str):
         error('could not find ssh key file {}'.format(key_file))
         return
 
+    # HACK: sshclient_from_instance always uses "dns_name", but we only have public or private IPs...
+    instance.dns_name = instance.ip_address or instance.private_ip_address
     ssh_client = sshclient_from_instance(instance,
                                          ssh_key_file=key_file,
                                          user_name='ubuntu')
