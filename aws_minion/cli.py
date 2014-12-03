@@ -742,8 +742,10 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
 @click.option('--public', is_flag=True, help='Launch instances and ELB in public subnet')
+@click.option('--instance-type', help='Use custom EC2 instance type')
 @click.pass_context
-def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, public: bool):
+def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, public: bool,
+                   instance_type: str):
     """
     Create a new application version
     """
@@ -851,7 +853,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                                  key_name=key_name,
                                  security_groups=[sg.id],
                                  user_data=init_script.encode('utf-8'),
-                                 instance_type=manifest.get('instance_type', 't2.micro'),
+                                 instance_type=manifest.get('instance_type', instance_type or 't2.micro'),
                                  instance_profile_name=app.identifier,
                                  associate_public_ip_address=(instance_layer == 'public'))
         autoscale.create_launch_configuration(lc)
