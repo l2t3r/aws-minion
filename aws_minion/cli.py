@@ -3,6 +3,7 @@ from distutils.version import LooseVersion
 import shlex
 import collections
 import os
+import socket
 import time
 import re
 from boto.route53.record import ResourceRecordSets
@@ -28,7 +29,7 @@ from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_ti
 
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound
-from aws_minion.docker import is_docker_image_valid, generate_env_options
+from aws_minion.docker import is_docker_image_valid, generate_env_options, extract_registry
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
     prepare_log_shipper_script
 from aws_minion.saml import saml_login
@@ -784,12 +785,24 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     dns_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
     fqdn = '{}-{}.{}'.format(application_name, application_version.replace('.', '-'), domain)
 
+    registry = extract_registry(docker_image)
+    registry_setup = ''
+
+    if registry:
+        registry_hostname = registry.split(':')[0]
+        registry_ip = socket.gethostbyname(registry_hostname)
+        registry_setup = '''
+            echo {registry_ip} {registry_hostname} >> /etc/hosts
+            echo 'DOCKER_OPTS="--insecure-registry {registry_hostname}"' > /etc/default/docker
+            '''.format(registry_ip=registry_ip, registry_hostname=registry_hostname)
+
     init_script = '''#!/bin/bash
     iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
     iid=${{iid/i-}}
     hostname {hostname}-$iid
     IP=$(ip -o -4 a show eth0 | awk '{{ print $4 }}' | cut -d/ -f 1)
     echo $IP $(hostname) >> /etc/hosts
+    {registry_setup}
 
     # add Docker repo
     apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
@@ -808,7 +821,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                hostname=dns_name,
                exposed_port=manifest['exposed_ports'][0],
                env_options=generate_env_options(env_vars),
-               log_shipper_script=shlex.quote(log_shipper_script))
+               log_shipper_script=shlex.quote(log_shipper_script),
+               registry_setup=registry_setup)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
