@@ -169,6 +169,7 @@ class Context:
                 if r.type == 'CNAME' and r.identifier and r.weight:
                     weights[r.identifier] = int(r.weight)
 
+        # TODO: the list of auto scaling groups should be filtered by VPC
         for group in groups:
             if group.name.startswith(IDENTIFIER_PREFIX):
                 _application_name, _application_version = group.name[len(IDENTIFIER_PREFIX):].rsplit('-', 1)

@@ -822,7 +822,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                                  user_data=init_script.encode('utf-8'),
                                  instance_type=manifest.get('instance_type', 't2.micro'),
                                  instance_profile_name=app.identifier,
-                                 associate_public_ip_address=True)
+                                 associate_public_ip_address=(instance_layer == 'public'))
         autoscale.create_launch_configuration(lc)
 
     lb_sg_name = 'app-{}-lb'.format(application_name)
