@@ -93,6 +93,7 @@ ToDos
 * use private and public subnets
 * fix hardcoded AMI ID
 * create new base AMI
+* support private Docker registry with authentication
 
 
 .. _AWS Minion Documentation on Read the Docs: http://aws-minion.readthedocs.org/
