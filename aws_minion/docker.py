@@ -137,3 +137,28 @@ def is_docker_image_valid(docker_image: str) -> bool:
         return is_registry_valid and is_namespace_valid and is_repo_valid
     else:
         return False
+
+
+def docker_image_exists(docker_image: str) -> bool:
+    """
+    Check whether the docker image exists by calling the Docker registry REST API
+    """
+    import requests
+
+    parts = docker_image.split('/')
+    registry = parts[0]
+    repo = '/'.join(parts[1:])
+    repo, tag = repo.split(':')
+
+    for scheme in 'https', 'http':
+        try:
+            url = '{scheme}://{registry}/v1/repositories/{repo}/tags/{tag}'.format(scheme=scheme,
+                                                                                   registry=registry,
+                                                                                   repo=repo,
+                                                                                   tag=tag)
+            r = requests.get(url)
+            result = r.json()
+            return isinstance(result, str)
+        except:
+            pass
+    return False
