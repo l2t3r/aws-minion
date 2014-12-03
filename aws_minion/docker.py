@@ -156,7 +156,7 @@ def docker_image_exists(docker_image: str) -> bool:
                                                                                    registry=registry,
                                                                                    repo=repo,
                                                                                    tag=tag)
-            r = requests.get(url)
+            r = requests.get(url, timeout=5, verify=False)
             result = r.json()
             return isinstance(result, str)
         except:
