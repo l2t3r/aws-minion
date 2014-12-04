@@ -43,8 +43,30 @@ def test_get_versions(monkeypatch):
     dns_conn = MagicMock(name='dns_conn')
     dns_conn.get_zone.return_value = zone
 
-    monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
+
+    group = MagicMock(name='auto scale group')
+    group.name = 'app-myapp-1.0'
+
+
+    autoscale = MagicMock(name='autoscale_conn')
+    autoscale.get_all_groups.return_value = [group]
+
+    monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock(return_value=autoscale))
     monkeypatch.setattr('boto.route53.connect_to_region', MagicMock(return_value=dns_conn))
     ctx = Context({'region': 'someregion', 'domain': 'apps.example.com'})
-    versions = ctx.get_versions('myapp', '1.0')
+    versions = ctx.get_versions('myapp', '0.1')
     assert versions == []
+
+    versions = ctx.get_versions('myapp', '1.0')
+    assert len(versions) == 1
+    assert versions[0].application_name == 'myapp'
+    assert versions[0].version == '1.0'
+
+    version = ctx.get_version('myapp', '1.0')
+    assert version == versions[0]
+
+    with pytest.raises(Exception):
+        ctx.get_version('non-existing-app', '0.1')
+
+
+        

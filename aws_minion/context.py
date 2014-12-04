@@ -102,6 +102,10 @@ class ApplicationInstance:
             return getattr(self.ec2_instance, item)
         raise AttributeError()
 
+    @staticmethod
+    def is_valid_instance(inst, vpc) -> bool:
+        return 'Name' in inst.tags and inst.tags['Name'].startswith(IDENTIFIER_PREFIX) and inst.vpc_id == vpc
+
 
 class Context:
     def __init__(self, config, profile='default'):
@@ -217,7 +221,7 @@ class Context:
         instances = conn.get_only_instances()
         res = []
         for inst in instances:
-            if 'Name' in inst.tags and inst.tags['Name'].startswith(IDENTIFIER_PREFIX) and inst.vpc_id == self.vpc:
+            if ApplicationInstance.is_valid_instance(inst, self.vpc):
                 res.append(ApplicationInstance(inst))
         return res
 
