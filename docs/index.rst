@@ -8,6 +8,7 @@ Contents:
 
     Basic Concepts <concepts>
     Quickstart <quickstart>
+    Command Line Interface <cli>
     Network Setup <network-setup>
 
 
