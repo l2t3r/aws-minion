@@ -1,3 +1,4 @@
+from distutils.version import LooseVersion
 import re
 import requests
 import shlex
@@ -179,7 +180,7 @@ def search_docker_images(registry: str, q: str) -> list:
                 try:
                     response = requests.get(url, timeout=2, verify=False)
                     for tag, _, in response.json().items():
-                        images.append('{}:{}'.format(repo, tag))
+                        images.append((repo, LooseVersion(tag), '{}:{}'.format(repo, tag)))
                 except:
                     pass
         except:

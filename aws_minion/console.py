@@ -115,7 +115,11 @@ def print_table(cols, rows):
         for col in cols:
             val = row.get(col)
             align = ''
-            style = STYLES.get(val, {})
+            try:
+                style = STYLES.get(val, {})
+            except:
+                # val might not be hashable
+                style = {}
             if val is not None and col.endswith('_time'):
                 align = '>'
                 diff = time.time() - val

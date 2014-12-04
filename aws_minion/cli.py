@@ -315,16 +315,22 @@ PREFIX = 'app-'
 
 
 @cli.command()
+@click.option('--registry', help='Use custom registry')
 @click.pass_obj
-def images(ctx):
+def images(ctx, registry):
     """
     List Docker images in private registry
     :param ctx:
     :return:
     """
-    registry = ctx.get_vpc_config().get('registry')
+    registry = registry or ctx.get_vpc_config().get('registry')
     if registry:
-        print(search_docker_images(registry, ''))
+        rows = []
+        images = search_docker_images(registry, '')
+        images.sort()
+        for repo, tag, image in images:
+            rows.append({'repository': repo, 'tag': tag, 'image': image})
+        print_table('repository tag image'.split(), rows)
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
