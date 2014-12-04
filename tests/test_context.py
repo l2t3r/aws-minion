@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock
-from aws_minion.context import Context, ApplicationNotFound
+from aws_minion.context import Context, ApplicationNotFound, ApplicationVersion
 
 
 def test_get_application_not_found(monkeypatch):
@@ -70,6 +70,16 @@ def test_get_versions(monkeypatch):
 
     with pytest.raises(Exception):
         ctx.get_version('non-existing-app', '0.1')
+
+
+def test_sort_versions():
+    unsorted = [
+        ApplicationVersion('myreg', 'myapp', '0.10', MagicMock()),
+        ApplicationVersion('myreg', 'myapp', '0.1', MagicMock()),
+        ApplicationVersion('myreg', 'myapp', '0.2', MagicMock()),
+    ]
+    unsorted.sort()
+    # TODO: ...
 
 
 def test_get_instances(monkeypatch):
