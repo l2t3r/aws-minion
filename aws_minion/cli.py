@@ -96,10 +96,10 @@ def validate_vpc_id(ctx, param, value):
     return value
 
 
-def modify_sg(c, group, rule, authorize=False, revoke=False):
+def modify_sg(ctx, group, rule, authorize=False, revoke=False):
     src_group = None
     if rule.src_group_name:
-        src_group = c.get_all_security_groups([rule.src_group_name])[0]
+        src_group = ctx.get_security_group(rule.src_group_name)
 
     if authorize and not revoke:
         group.authorize(ip_protocol=rule.ip_protocol,
@@ -1026,11 +1026,14 @@ def create(ctx, manifest_file):
 
         rules = [
             SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
+            # TODO: restrict access to private subnets
             SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
+            # allow accessing all ports from within the same security group
+            SecurityGroupRule("tcp", 0, 65535, None, sg_name)
         ]
 
         for rule in rules:
-            modify_sg(conn, sg, rule, authorize=True)
+            modify_sg(ctx.obj, sg, rule, authorize=True)
 
     lb_sg_name = sg_name + '-lb'
     with Action('Creating LB security group {lb_sg_name}..', **vars()):
@@ -1044,7 +1047,7 @@ def create(ctx, manifest_file):
         ]
 
         for rule in rules:
-            modify_sg(conn, sg, rule, authorize=True)
+            modify_sg(ctx.obj, sg, rule, authorize=True)
 
     with Action('Creating IAM role and instance profile..'):
         iam_conn = boto.iam.connect_to_region(region)
