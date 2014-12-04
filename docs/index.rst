@@ -9,6 +9,7 @@ Contents:
     Basic Concepts <concepts>
     Quickstart <quickstart>
     Command Line Interface <cli>
+    Application Manifest <manifest>
     Network Setup <network-setup>
 
 
