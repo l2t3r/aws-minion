@@ -29,6 +29,9 @@ def test_get_applications(monkeypatch):
     apps = ctx.get_applications()
     assert len(apps) == 1
 
+    app = ctx.get_application('myapp')
+    assert app == apps[0]
+
 
 def test_get_versions(monkeypatch):
 
@@ -69,4 +72,20 @@ def test_get_versions(monkeypatch):
         ctx.get_version('non-existing-app', '0.1')
 
 
-        
+def test_get_instances(monkeypatch):
+    conn = MagicMock(name='conn')
+    instance = MagicMock(name='instance')
+    instance.tags = {'Name': 'app-myapp-123'}
+    instance.vpc_id = 'myvpc'
+    instance.id = 'myid'
+    conn.get_only_instances.return_value = [instance]
+    monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock(name='connect_to_region', return_value=conn))
+
+    ctx = Context({'region': 'someregion', 'domain': 'apps.example.com', 'vpc': 'myvpc'})
+    instances = ctx.get_instances()
+    assert len(instances) == 1
+
+    instance = ctx.get_instance_by_id('myid')
+    assert instance.tags == instances[0].tags
+
+    assert ctx.get_instance_by_id('000') is None
