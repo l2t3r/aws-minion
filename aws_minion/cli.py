@@ -123,8 +123,10 @@ def print_version(ctx, param, value):
 
 
 @click.group(cls=AliasedGroup, context_settings=CONTEXT_SETTINGS)
-@click.option('--config-file', '-c', help='Use alternative configuration file', default=CONFIG_FILE_PATH)
-@click.option('--profile', '-p', help='Configuration profile to use', default='default', envvar='AWS_MINION_PROFILE')
+@click.option('--config-file', '-c', help='Use alternative configuration file',
+              default=CONFIG_FILE_PATH, metavar='PATH')
+@click.option('--profile', '-p', help='Configuration profile to use', default='default', envvar='AWS_MINION_PROFILE',
+              metavar='NAME')
 @click.option('-V', '--version', is_flag=True, callback=print_version, expose_value=False, is_eager=True)
 @click.pass_context
 def cli(ctx, config_file, profile):
@@ -315,22 +317,23 @@ PREFIX = 'app-'
 
 
 @cli.command()
-@click.option('--registry', help='Use custom registry')
+@click.option('--registry', help='Use custom registry', metavar='HOST:PORT')
 @click.pass_obj
 def images(ctx, registry):
     """
     List Docker images in private registry
-    :param ctx:
-    :return:
     """
     registry = registry or ctx.get_vpc_config().get('registry')
-    if registry:
-        rows = []
-        images = search_docker_images(registry, '')
-        images.sort()
-        for repo, tag, image in images:
-            rows.append({'repository': repo, 'tag': tag, 'image': image})
-        print_table('repository tag image'.split(), rows)
+    if not registry:
+        raise click.UsageError('Docker registry not defined. ' +
+                               'Define a registry for this VPC ("Config" tag on VPC) or use "--registry" option.')
+
+    rows = []
+    images = search_docker_images(registry, '')
+    images.sort()
+    for repo, tag, image in images:
+        rows.append({'repository': repo, 'tag': tag, 'image': image})
+    print_table('repository tag image'.split(), rows)
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
@@ -759,9 +762,9 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
 @click.argument('docker-image')
-@click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"')
+@click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"', metavar='KEY=VAL')
 @click.option('--public', is_flag=True, help='Launch instances and ELB in public subnet')
-@click.option('--instance-type', help='Use custom EC2 instance type')
+@click.option('--instance-type', help='Use custom EC2 instance type', metavar='EC2_TYPE')
 @click.pass_context
 def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, public: bool,
                    instance_type: str):
@@ -1155,9 +1158,9 @@ def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
 
 
 @cli.command()
-@click.option('--url', '-u', help='SAML identity provider URL')
-@click.option('--user', '-U', help='SAML Username')
-@click.option('--password', '-p', help='SAML Password')
+@click.option('--url', '-u', help='SAML identity provider URL', metavar='URL')
+@click.option('--user', '-U', help='SAML Username', metavar='USERNAME')
+@click.option('--password', '-p', help='SAML Password', metavar='PWD')
 @click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
 @click.option('--overwrite-credentials', help='Always overwrite AWS credentials file', is_flag=True)
 @click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
