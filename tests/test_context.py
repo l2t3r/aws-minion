@@ -13,6 +13,23 @@ def test_get_application_not_found(monkeypatch):
         ctx.get_application('myapp-non-existing')
 
 
+def test_get_applications(monkeypatch):
+    conn = MagicMock(name='conn')
+    sg1 = MagicMock(name='invalid sg')
+    sg2 = MagicMock(name='valid sg')
+    sg2.name = 'app-myapp'
+    sg2.tags = {'Manifest': 'a: b'}
+    sg2.vpc_id = 'myvpc'
+    sg3 = MagicMock(name='another invalid sg')
+    sg3.name = 'app-myapp-db'
+    sg3.vpc_id = 'myvpc'
+    conn.get_all_security_groups.return_value = [sg1, sg2, sg3]
+    monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock(name='connect_to_region', return_value=conn))
+    ctx = Context({'region': 'someregion', 'domain': 'apps.example.com', 'vpc': 'myvpc'})
+    apps = ctx.get_applications()
+    assert len(apps) == 1
+
+
 def test_get_versions(monkeypatch):
     monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.route53.connect_to_region', MagicMock())

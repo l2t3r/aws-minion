@@ -26,6 +26,11 @@ class Application:
         self.security_group = security_group
         self.manifest = yaml.safe_load(security_group.tags['Manifest'])
 
+    @staticmethod
+    def is_valid_security_group(sg, vpc: str):
+        return sg.name.startswith(IDENTIFIER_PREFIX) and sg.vpc_id == vpc \
+            and not sg.name.endswith('-lb') and 'Manifest' in sg.tags
+
     @property
     def identifier(self) -> str:
         return IDENTIFIER_PREFIX + self.name
@@ -162,7 +167,7 @@ class Context:
         rows = []
         all_security_groups = conn.get_all_security_groups()
         for _sg in all_security_groups:
-            if _sg.name.startswith(IDENTIFIER_PREFIX) and _sg.vpc_id == self.vpc and not _sg.name.endswith('-lb'):
+            if Application.is_valid_security_group(_sg, self.vpc):
                 rows.append(Application(_sg.name[len(IDENTIFIER_PREFIX):], _sg))
         return rows
 
