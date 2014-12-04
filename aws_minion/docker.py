@@ -1,4 +1,5 @@
 import re
+import requests
 import shlex
 
 
@@ -143,7 +144,6 @@ def docker_image_exists(docker_image: str) -> bool:
     """
     Check whether the docker image exists by calling the Docker registry REST API
     """
-    import requests
 
     parts = docker_image.split('/')
     registry = parts[0]
@@ -162,3 +162,26 @@ def docker_image_exists(docker_image: str) -> bool:
         except:
             pass
     return False
+
+
+def search_docker_images(registry: str, q: str) -> list:
+    images = []
+    for scheme in 'https', 'http':
+        try:
+            url = '{scheme}://{registry}/v1/search'.format(scheme=scheme, registry=registry)
+            r = requests.get(url, timeout=5, verify=False, params={'q': q})
+            data = r.json()
+            for result in data['results']:
+                repo = result['name']
+                url = '{scheme}://{registry}/v1/repositories/{repo}/tags'.format(scheme=scheme,
+                                                                                 registry=registry,
+                                                                                 repo=repo)
+                try:
+                    response = requests.get(url, timeout=2, verify=False)
+                    for tag, _, in response.json().items():
+                        images.append('{}:{}'.format(repo, tag))
+                except:
+                    pass
+        except:
+            pass
+    return images

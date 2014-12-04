@@ -30,7 +30,7 @@ from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_ti
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound
 from aws_minion.docker import is_docker_image_valid, generate_env_options, extract_registry, replace_registry, \
-    docker_image_exists
+    docker_image_exists, search_docker_images
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
     prepare_log_shipper_script
 from aws_minion.saml import saml_login
@@ -312,6 +312,19 @@ def applications(ctx):
 
 
 PREFIX = 'app-'
+
+
+@cli.command()
+@click.pass_obj
+def images(ctx):
+    """
+    List Docker images in private registry
+    :param ctx:
+    :return:
+    """
+    registry = ctx.get_vpc_config().get('registry')
+    if registry:
+        print(search_docker_images(registry, ''))
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
