@@ -31,8 +31,20 @@ def test_get_applications(monkeypatch):
 
 
 def test_get_versions(monkeypatch):
+
+    record = MagicMock()
+    record.type = 'CNAME'
+    record.identifier = 'app-myapp'
+    record.weight = 100
+
+    zone = MagicMock(name='zone')
+    zone.get_records.return_value = [record]
+
+    dns_conn = MagicMock(name='dns_conn')
+    dns_conn.get_zone.return_value = zone
+
     monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
-    monkeypatch.setattr('boto.route53.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.route53.connect_to_region', MagicMock(return_value=dns_conn))
     ctx = Context({'region': 'someregion', 'domain': 'apps.example.com'})
     versions = ctx.get_versions('myapp', '1.0')
     assert versions == []
