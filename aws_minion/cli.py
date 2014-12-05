@@ -27,7 +27,8 @@ import aws_minion
 from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_time, format_time
 
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
-from aws_minion.context import Context, ApplicationNotFound
+from aws_minion.context import Context, ApplicationNotFound, Application, APPLICATION_NAME_PATTERN, \
+    APPLICATION_VERSION_PATTERN
 from aws_minion.docker import is_docker_image_valid, generate_env_options, extract_registry, replace_registry, \
     docker_image_exists, search_docker_images
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
@@ -40,9 +41,6 @@ AMI_ID = 'ami-f0b11187'
 
 CONFIG_DIR_PATH = click.get_app_dir('aws-minion')
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'aws-minion.yaml')
-APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
-# NOTE: version MUST not contain any dash ("-")
-APPLICATION_VERSION_PATTERN = re.compile('^[a-zA-Z0-9.]{1,200}$')
 
 VPC_ID_PATTERN = re.compile('^vpc-[a-z0-9]+$')
 
@@ -1020,9 +1018,9 @@ def create(ctx, manifest_file):
     """
 
     try:
-        manifest = yaml.safe_load(manifest_file.read())
+        manifest = Application.read_manifest(manifest_file)
     except Exception as e:
-        raise click.UsageError('Failed to parse YAML file: {}'.format(e))
+        raise click.UsageError('Failed to parse manifest file: {}'.format(e))
 
     application_name = manifest['application_name']
     team_name = manifest['team_name']
@@ -1093,6 +1091,26 @@ def create(ctx, manifest_file):
         iam_conn.create_role(sg_name)
         iam_conn.create_instance_profile(sg_name)
         iam_conn.add_role_to_instance_profile(instance_profile_name=sg_name, role_name=sg_name)
+
+
+@applications.command()
+@click.argument('manifest-file', type=click.File('rb'))
+@click.pass_obj
+def update(ctx: Context, manifest_file):
+    """
+    Update application manifest
+    """
+
+    try:
+        manifest = Application.read_manifest(manifest_file)
+    except Exception as e:
+        raise click.UsageError('Failed to parse manifest file: {}'.format(e))
+
+    application_name = manifest['application_name']
+    app = ctx.get_application(application_name)
+
+    app.manfest = manifest
+    raise NotImplementedError('TODO')
 
 
 @applications.command()

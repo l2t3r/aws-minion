@@ -1,3 +1,4 @@
+import re
 import boto.ec2
 import boto.iam
 import boto.vpc
@@ -10,6 +11,10 @@ from aws_minion.utils import ComparableLooseVersion
 
 IDENTIFIER_PREFIX = 'app-'
 
+APPLICATION_NAME_PATTERN = re.compile('^[a-z][a-z0-9-]{,199}$')
+# NOTE: version MUST not contain any dash ("-")
+APPLICATION_VERSION_PATTERN = re.compile('^[a-zA-Z0-9.]{1,200}$')
+
 
 class ApplicationNotFound(Exception):
     def __init__(self, application_name):
@@ -19,6 +24,14 @@ class ApplicationNotFound(Exception):
         return 'Application "{}" does not exist'.format(self.application_name)
 
 
+class InvalidManifestError(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+
+    def __str__(self):
+        return 'Invalid application manifest: {}'.format(self.msg)
+
+
 @functools.total_ordering
 class Application:
 
@@ -26,6 +39,26 @@ class Application:
         self.name = name
         self.security_group = security_group
         self.manifest = yaml.safe_load(security_group.tags['Manifest'])
+
+    @staticmethod
+    def read_manifest(fd):
+        try:
+            manifest = yaml.safe_load(fd.read())
+        except Exception as e:
+            raise InvalidManifestError('failed to parse YAML: {}'.format(e))
+        try:
+            assert APPLICATION_NAME_PATTERN.match(manifest['application_name'])
+        except:
+            raise InvalidManifestError('invalid value for "application_name"')
+        try:
+            assert isinstance(manifest['team_name'], str)
+        except:
+            raise InvalidManifestError('invalid value for "team_name"')
+        try:
+            assert isinstance(manifest['exposed_ports'], list)
+        except:
+            raise InvalidManifestError('invalid value for "exposed_ports"')
+        return manifest
 
     @staticmethod
     def is_valid_security_group(sg, vpc: str):
