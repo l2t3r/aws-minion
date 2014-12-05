@@ -16,11 +16,11 @@ def parse_time(s: str) -> float:
 
 def format_time(dt: datetime.datetime=None) -> str:
     """
-    >>> dt = datetime.datetime.now(); (dt.timestamp() - time.timezone) - parse_time(format_time(dt))
+    >>> dt = datetime.datetime.utcnow(); (dt.timestamp() - time.timezone) - parse_time(format_time(dt))
     0.0
     """
     if not dt:
-        dt = datetime.datetime.now()
+        dt = datetime.datetime.utcnow()
     return dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
 
