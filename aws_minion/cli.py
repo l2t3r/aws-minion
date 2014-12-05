@@ -309,7 +309,7 @@ def applications(ctx):
         for app in ctx.obj.get_applications():
             rows.append({k: str(v) for k, v in app.manifest.items()})
         rows.sort(key=lambda x: x.get('application_name'))
-        print_table('application_name team_name exposed_ports stateful'.split(), rows)
+        print_table('application_name team_name exposed_ports stateful instance_type health_check_http_path'.split(), rows)
 
 
 PREFIX = 'app-'
@@ -329,7 +329,6 @@ def images(ctx, registry):
 
     rows = []
     images = search_docker_images(registry, '')
-    print(images)
     images.sort()
     for repo, tag, image in images:
         rows.append({'repository': repo, 'tag': tag, 'image': image})
