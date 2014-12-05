@@ -1148,6 +1148,9 @@ def delete(ctx, application_name: str):
             except:
                 time.sleep(3)
                 act.progress()
+            if not ctx.obj.get_security_group(sg.name):
+                # seems to be deleted
+                break
 
     with Action('Deleting keypair..'):
         keypair = conn.get_key_pair(sg.name)
