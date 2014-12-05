@@ -24,7 +24,7 @@ import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
 import aws_minion
-from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_time
+from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_time, format_time
 
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound
@@ -307,9 +307,11 @@ def applications(ctx):
     if not ctx.invoked_subcommand:
         rows = []
         for app in ctx.obj.get_applications():
+            print(app.security_group.__dict__)
             rows.append({k: str(v) for k, v in app.manifest.items()})
         rows.sort(key=lambda x: x.get('application_name'))
-        print_table('application_name team_name exposed_ports stateful instance_type health_check_http_path'.split(), rows)
+        print_table(('application_name team_name exposed_ports stateful ' +
+                     'instance_type health_check_http_path').split(), rows)
 
 
 PREFIX = 'app-'
@@ -1059,7 +1061,7 @@ def create(ctx, manifest_file):
     with Action('Creating application security group {sg_name}..', **vars()):
         sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
         # HACK: add manifest as tag
-        sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
+        sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest), 'CreatedTime': format_time()})
 
         rules = [
             SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),

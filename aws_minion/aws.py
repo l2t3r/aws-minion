@@ -14,6 +14,16 @@ def parse_time(s: str) -> float:
         return None
 
 
+def format_time(dt: datetime.datetime=None) -> str:
+    """
+    >>> dt = datetime.datetime.now(); (dt.timestamp() - time.timezone) - parse_time(format_time(dt))
+    0.0
+    """
+    if not dt:
+        dt = datetime.datetime.now()
+    return dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+
 def write_aws_credentials(key_id, secret, session_token=None):
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
