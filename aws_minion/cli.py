@@ -853,6 +853,20 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     IP=$(ip -o -4 a show eth0 | awk '{{ print $4 }}' | cut -d/ -f 1)
     echo $IP $(hostname) >> /etc/hosts
     {dns_setup}
+
+    # TODO: Disk Setup (EC2 Instance Storage)
+    # fdisk /dev/xvdb <<EOF
+    # o
+    # n
+    # p
+    # 1
+    #
+    #
+    # w
+    # EOF
+    # mke2fs -F -L "aws-minion-data" -t ext4 -O ^has_journal -m 0 /dev/xvdb1
+    # mount /dev/xvdb1 /data
+
     {registry_setup}
 
     # add Docker repo
