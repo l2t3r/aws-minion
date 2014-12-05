@@ -827,8 +827,9 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     nameservers = vpc_config.get('nameservers')
     dns_setup = ''
     if nameservers:
+        dns_setup = 'echo > /etc/resolv.conf\n'
         for nameserver in nameservers:
-            dns_setup += 'nameserver {}\n'.format(nameserver)
+            dns_setup += 'echo "nameserver {}" >> /etc/resolv.conf\n'.format(nameserver)
 
     registry = extract_registry(docker_image) or vpc_config.get('registry')
     registry_setup = ''
