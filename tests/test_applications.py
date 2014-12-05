@@ -58,4 +58,4 @@ def test_list_applications(monkeypatch):
         result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'app'], catch_exceptions=False)
 
     lines = result.output.splitlines()
-    assert lines[2].split() == ['myapp', 'MyTeam', '[123]']
+    assert lines[1].split() == ['myapp', 'MyTeam', '[123]']

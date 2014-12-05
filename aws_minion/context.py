@@ -5,6 +5,7 @@ from boto.ec2.elb import LoadBalancer
 import functools
 import yaml
 import os
+from aws_minion.aws import parse_time
 from aws_minion.utils import ComparableLooseVersion
 
 IDENTIFIER_PREFIX = 'app-'
@@ -34,6 +35,14 @@ class Application:
     @property
     def identifier(self) -> str:
         return IDENTIFIER_PREFIX + self.name
+
+    @property
+    def created_time(self) -> float:
+        try:
+            return parse_time(self.security_group.tags['CreatedTime'])
+        except:
+            # users might tinker with tags, so just ignore invalid timestamps
+            return None
 
     def get_key_file_path(self):
         """
