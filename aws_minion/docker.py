@@ -1,7 +1,7 @@
-from distutils.version import LooseVersion
 import re
 import requests
 import shlex
+from aws_minion.utils import ComparableLooseVersion
 
 
 REGISTRY_PATTERN = re.compile("^(([a-zA-Z]|[a-zA-Z][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*" +
@@ -180,7 +180,7 @@ def search_docker_images(registry: str, q: str) -> list:
                 try:
                     response = requests.get(url, timeout=2, verify=False)
                     for tag, _, in response.json().items():
-                        images.append((repo, LooseVersion(tag), '{}:{}'.format(repo, tag)))
+                        images.append((repo, ComparableLooseVersion(tag), '{}:{}'.format(repo, tag)))
                 except:
                     pass
         except:

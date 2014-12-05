@@ -1,3 +1,4 @@
+from distutils.version import LooseVersion
 from click.types import FloatParamType
 
 
@@ -36,3 +37,40 @@ class FloatRange(FloatParamType):
 
     def __repr__(self):
         return 'FloatRange(%r, %r)' % (self.min, self.max)
+
+
+class ComparableLooseVersion(LooseVersion):
+    """
+    "Safe" LooseVersion, which allows comparing versions with mixed str/int components without raising an error.
+
+    >>> ComparableLooseVersion('0.1') == '0.1'
+    True
+
+    >>> ComparableLooseVersion('0.1') < '0.2'
+    True
+
+    >>> ComparableLooseVersion('0.1.a') == '0.1.1'
+    True
+
+    >>> ComparableLooseVersion('0.1.a') < '0.1.1'
+    False
+
+    >>> ComparableLooseVersion('0.1.a') > '0.1.1'
+    False
+    """
+
+    def _cmp(self, other):
+        if isinstance(other, str):
+            other = ComparableLooseVersion(other)
+
+        if self.version == other.version:
+            return 0
+        try:
+            if self.version < other.version:
+                return -1
+            if self.version > other.version:
+                return 1
+        except TypeError:
+            # TypeError: unorderable types: str() < int()
+            # => just don't care!
+            return 0

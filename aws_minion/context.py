@@ -1,4 +1,3 @@
-from distutils.version import LooseVersion
 import boto.ec2
 import boto.iam
 import boto.vpc
@@ -6,6 +5,7 @@ from boto.ec2.elb import LoadBalancer
 import functools
 import yaml
 import os
+from aws_minion.utils import ComparableLooseVersion
 
 IDENTIFIER_PREFIX = 'app-'
 
@@ -85,7 +85,7 @@ class ApplicationVersion:
             return None
 
     def __lt__(self, other):
-        key = lambda v: (v.application_name, LooseVersion(self.version), )
+        key = lambda v: (v.application_name, ComparableLooseVersion(self.version), )
         return key(self) < key(other)
 
     def __eq__(self, other):

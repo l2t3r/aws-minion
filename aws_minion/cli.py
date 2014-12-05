@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from distutils.version import LooseVersion
 import shlex
 import collections
 import os
@@ -34,7 +33,7 @@ from aws_minion.docker import is_docker_image_valid, generate_env_options, extra
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
     prepare_log_shipper_script
 from aws_minion.saml import saml_login
-from aws_minion.utils import FloatRange
+from aws_minion.utils import FloatRange, ComparableLooseVersion
 
 # FIXME: hardcoded for eu-west-1: Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 AMI_ID = 'ami-f0b11187'
@@ -330,6 +329,7 @@ def images(ctx, registry):
 
     rows = []
     images = search_docker_images(registry, '')
+    print(images)
     images.sort()
     for repo, tag, image in images:
         rows.append({'repository': repo, 'tag': tag, 'image': image})
@@ -375,7 +375,7 @@ def versions(ctx):
                          'weight': version.weight / PERCENT_RESOLUTION if version.weight else None,
                          'created_time': parse_time(version.auto_scaling_group.created_time)})
 
-        rows.sort(key=lambda x: (x['application_name'], LooseVersion(x['application_version'])))
+        rows.sort(key=lambda x: (x['application_name'], ComparableLooseVersion(x['application_version'])))
         print_table(('application_name application_version ' +
                      'docker_image instance_states desired_capacity weight created_time').split(), rows)
 
@@ -408,7 +408,8 @@ def instances(ctx):
                          'state': instance.state.upper(),
                          'launch_time': parse_time(instance.launch_time)})
         now = time.time()
-        rows.sort(key=lambda x: (x['application_name'], LooseVersion(x['application_version']), now - x['launch_time']))
+        rows.sort(key=lambda x: (x['application_name'],
+                                 ComparableLooseVersion(x['application_version']), now - x['launch_time']))
         print_table(('application_name application_version instance_id team '
                     + 'public_ip private_ip state launch_time').split(), rows)
 
@@ -532,7 +533,7 @@ def set_new_weights(dns_name, identifier, lb, new_record_weights, percentage, rr
 
 def dump_traffic_changes(application_name: str,
                          identifier: str,
-                         identifier_versions: {str: LooseVersion},
+                         identifier_versions: {str: ComparableLooseVersion},
                          known_record_weights: {str: int},
                          new_record_weights: {str: int},
                          compensations: {str: int},
@@ -580,7 +581,7 @@ def change_version_traffic(application_name: str, application_version: str, ctx:
     if not versions:
         raise click.BadParameter('Could not find any versions for application')
     identifier_versions = collections.OrderedDict(
-        (av.dns_identifier, LooseVersion(av.version)) for av in version_list)
+        (av.dns_identifier, ComparableLooseVersion(av.version)) for av in version_list)
     try:
         version = next(v for v in version_list if v.version == application_version)
     except StopIteration:
