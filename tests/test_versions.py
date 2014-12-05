@@ -16,6 +16,7 @@ def test_versions_list(monkeypatch):
 
     context = Context({'region': 'caprica'})
     context.get_versions = lambda: [version]
+    context.get_vpc_config = lambda: {}
     context_constructor = lambda x, y: context
 
     monkeypatch.setattr('aws_minion.cli.Context', context_constructor)

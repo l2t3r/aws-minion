@@ -343,6 +343,8 @@ def versions(ctx):
     Manage application versions, list all versions
     """
     if not ctx.invoked_subcommand:
+        registry = ctx.obj.get_vpc_config().get('registry', '')
+
         rows = []
         for version in ctx.obj.get_versions():
 
@@ -359,9 +361,14 @@ def versions(ctx):
             if not instance_states:
                 instance_states = '(no instances)'
 
+            docker_image = version.docker_image
+
+            if registry and docker_image.startswith(registry + '/'):
+                docker_image = docker_image[len(registry)+1:]
+
             rows.append({'application_name': version.application_name,
                          'application_version': version.version,
-                         'docker_image': version.docker_image,
+                         'docker_image': docker_image,
                          'instance_states': instance_states,
                          'desired_capacity': version.auto_scaling_group.desired_capacity,
                          'dns_name': dns_name,
@@ -817,6 +824,12 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     dns_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
     fqdn = '{}-{}.{}'.format(application_name, application_version.replace('.', '-'), domain)
 
+    nameservers = vpc_config.get('nameservers')
+    dns_setup = ''
+    if nameservers:
+        for nameserver in nameservers:
+            dns_setup += 'nameserver {}\n'.format(nameserver)
+
     registry = extract_registry(docker_image) or vpc_config.get('registry')
     registry_setup = ''
 
@@ -826,7 +839,6 @@ def create_version(ctx, application_name: str, application_version: str, docker_
             registry_hostname = registry.split(':')[0]
             registry_ip = socket.gethostbyname(registry_hostname)
             registry_setup = '''
-                echo {registry_ip} {registry_hostname} >> /etc/hosts
                 echo 'DOCKER_OPTS="--insecure-registry {registry_hostname}"' > /etc/default/docker
                 '''.format(registry_ip=registry_ip, registry_hostname=registry_hostname)
             if not docker_image_exists(docker_image):
@@ -839,6 +851,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     hostname {hostname}-$iid
     IP=$(ip -o -4 a show eth0 | awk '{{ print $4 }}' | cut -d/ -f 1)
     echo $IP $(hostname) >> /etc/hosts
+    {dns_setup}
     {registry_setup}
 
     # add Docker repo
@@ -863,6 +876,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                exposed_port=manifest['exposed_ports'][0],
                env_options=generate_env_options(env_vars),
                log_shipper_script=shlex.quote(log_shipper_script),
+               dns_setup=dns_setup,
                registry_setup=registry_setup)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
