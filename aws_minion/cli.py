@@ -909,13 +909,13 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
     ''').format(docker_image=docker_image,
-               hostname=dns_name,
-               exposed_port=manifest['exposed_ports'][0],
-               env_options=generate_env_options(env_vars),
-               log_shipper_script=shlex.quote(log_shipper_script),
-               dns_setup=dns_setup,
-               registry_setup=registry_setup,
-               volume_options=generate_volume_options(dns_name, manifest))
+                hostname=dns_name,
+                exposed_port=manifest['exposed_ports'][0],
+                env_options=generate_env_options(env_vars),
+                log_shipper_script=shlex.quote(log_shipper_script),
+                dns_setup=dns_setup,
+                registry_setup=registry_setup,
+                volume_options=generate_volume_options(dns_name, manifest))
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
