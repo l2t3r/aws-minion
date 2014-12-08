@@ -3,6 +3,7 @@ import shlex
 import collections
 import os
 import socket
+from textwrap import dedent
 import time
 import re
 from boto.route53.record import ResourceRecordSets
@@ -858,7 +859,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                 act.error('DOCKER IMAGE NOT FOUND')
                 return
 
-    init_script = '''#!/bin/bash
+    init_script = dedent('''\
+    #!/bin/bash
     iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
     iid=${{iid/i-}}
     hostname {hostname}-$iid
@@ -869,14 +871,14 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     # TODO: Disk Setup (EC2 Instance Storage)
     if [ -b /dev/xvdb ]; then
         fdisk /dev/xvdb <<EOF
-        o
-        n
-        p
-        1
+    o
+    n
+    p
+    1
 
 
-        w
-        EOF
+    w
+    EOF
         mke2fs -F -L "aws-minion-data" -t ext4 -O ^has_journal -m 0 /dev/xvdb1
         mount /dev/xvdb1 /data
         for i in $(seq 1 9); do
@@ -904,7 +906,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
-    '''.format(docker_image=docker_image,
+    ''').format(docker_image=docker_image,
                hostname=dns_name,
                exposed_port=manifest['exposed_ports'][0],
                env_options=generate_env_options(env_vars),
