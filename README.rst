@@ -74,6 +74,14 @@ Running Unit Tests
     $ python3 setup.py test --cov-html=yes  # run unit tests
     $ python3 setup.py flake8               # check code formatting
 
+Releasing a New Version
+=======================
+
+Bump version, run tests, commit, tag and upload to PyPI:
+
+.. code-block:: bash
+
+    $ ./release.sh <NEW-VERSION>
 
 Documentation
 =============
