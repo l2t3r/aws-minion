@@ -870,6 +870,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     # TODO: Disk Setup (EC2 Instance Storage)
     if [ -b /dev/xvdb ]; then
+        umount /dev/xvdb
         fdisk /dev/xvdb <<EOF
     o
     n
@@ -880,6 +881,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     w
     EOF
         mke2fs -F -L "aws-minion-data" -t ext4 -O ^has_journal -m 0 /dev/xvdb1
+        mkdir /data
         mount /dev/xvdb1 /data
         for i in $(seq 1 9); do
             mkdir -p /data/{hostname}/$i
