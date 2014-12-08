@@ -60,6 +60,9 @@ class Application:
             raise InvalidManifestError('invalid value for "exposed_ports"')
         return manifest
 
+    def update_manifest(self, manifest: dict):
+        self.security_group.add_tag('Manifest', yaml.safe_dump(manifest))
+
     @staticmethod
     def is_valid_security_group(sg, vpc: str):
         return sg.name.startswith(IDENTIFIER_PREFIX) and sg.vpc_id == vpc \

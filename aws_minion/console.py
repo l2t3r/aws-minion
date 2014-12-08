@@ -13,7 +13,8 @@ TITLES = {
     'application_version': 'Ver.',
     'desired_capacity': 'Desired#',
     'created_time': 'Created',
-    'launch_time': 'Launched'
+    'launch_time': 'Launched',
+    'health_check_http_path': 'Health Check'
 }
 
 MAX_COLUMN_WIDTH = {

@@ -3,3 +3,7 @@ application_name: myapp
 team_name: MyOrganization/MyTeam
 stateful: false
 exposed_ports: [80]
+filesystems:
+    - type: temporary
+      mountpoint: /tmp
+      size_mb: 100

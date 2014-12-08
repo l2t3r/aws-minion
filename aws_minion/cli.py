@@ -307,9 +307,11 @@ def applications(ctx):
         for app in ctx.obj.get_applications():
             rows.append({k: str(v) for k, v in app.manifest.items()})
             rows[-1]['created_time'] = app.created_time
+            if 'filesystems' in app.manifest:
+                rows[-1]['filesystems'] = ', '.join([fs['mountpoint'] for fs in app.manifest['filesystems']])
         rows.sort(key=lambda x: x.get('application_name'))
-        print_table(('application_name team_name exposed_ports stateful ' +
-                     'instance_type health_check_http_path created_time').split(), rows)
+        print_table(('application_name team_name exposed_ports ' +
+                     'instance_type health_check_http_path filesystems created_time').split(), rows)
 
 
 PREFIX = 'app-'
@@ -765,6 +767,16 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
     return by_layer
 
 
+def generate_volume_options(app_folder: str, manifest: dict) -> str:
+    options = []
+    i = 1
+    for fs in manifest.get('filesystems', []):
+        options.append('-v')
+        options.append(shlex.quote('/data/{}/{}:{}'.format(app_folder, i, fs.get('mountpoint', '/data'))))
+        i += 1
+    return ' '.join(options)
+
+
 @versions.command('create')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
@@ -855,17 +867,23 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     {dns_setup}
 
     # TODO: Disk Setup (EC2 Instance Storage)
-    # fdisk /dev/xvdb <<EOF
-    # o
-    # n
-    # p
-    # 1
-    #
-    #
-    # w
-    # EOF
-    # mke2fs -F -L "aws-minion-data" -t ext4 -O ^has_journal -m 0 /dev/xvdb1
-    # mount /dev/xvdb1 /data
+    if [ -b /dev/xvdb ]; then
+        fdisk /dev/xvdb <<EOF
+        o
+        n
+        p
+        1
+
+
+        w
+        EOF
+        mke2fs -F -L "aws-minion-data" -t ext4 -O ^has_journal -m 0 /dev/xvdb1
+        mount /dev/xvdb1 /data
+        for i in $(seq 1 9); do
+            mkdir -p /data/{hostname}/$i
+            chmod 777 /data/{hostname}/$i
+        done
+    fi
 
     {registry_setup}
 
@@ -882,7 +900,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         echo 'Docker pull failed, retrying..'
         sleep 3
     done
-    containerId=$(docker run -d {env_options} --net=host {docker_image})
+    containerId=$(docker run -d {env_options} {volume_options} --net=host {docker_image})
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
@@ -892,7 +910,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                env_options=generate_env_options(env_vars),
                log_shipper_script=shlex.quote(log_shipper_script),
                dns_setup=dns_setup,
-               registry_setup=registry_setup)
+               registry_setup=registry_setup,
+               volume_options=generate_volume_options(dns_name, manifest))
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
@@ -1123,8 +1142,8 @@ def update(ctx: Context, manifest_file):
     application_name = manifest['application_name']
     app = ctx.get_application(application_name)
 
-    app.manfest = manifest
-    raise NotImplementedError('TODO')
+    with Action('Updating application manifest..'):
+        app.update_manifest(manifest)
 
 
 @applications.command()
