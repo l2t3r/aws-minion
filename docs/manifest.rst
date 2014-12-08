@@ -19,3 +19,31 @@ The **Application Manifest** defines the basic application configuration such as
 
 AWS Minion stores the application manifest as YAML in the "Manifest" tag on the application's security group (e.g. app-myapp).
 
+Manifest Configuration Keys
+===========================
+
+``application_name``
+    The application name must follow the regex pattern ``^[a-z][a-z0-9-]{,199}$``.
+
+``team_name``
+    Name of the team owning the application.
+
+``exposed_ports``
+    List of exposed TCP port numbers.
+
+``instance_type``
+    The EC2 instance type (e.g. ``t2.micro`` or ``m3.large``).
+
+``health-check-http-path``
+    HTTP path for HTTP health check mode. Performs GET requests to the given path and waits for status code 200.
+
+``filesystems``
+    List of filesystem volumes. Each filesystem must be a map with the keys ``type``, ``mountpoint`` and ``size_mb``.
+    "Temporary" filesystems will use the `EC2 Instance Store`_ and mount it under the
+    specified ``mountpoint`` (you need to use an instance type with instance store, e.g. ``m3.large``).
+
+
+
+.. _EC2 Instance Store: http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/InstanceStorage.html
+
+
