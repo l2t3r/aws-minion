@@ -12,6 +12,10 @@ The **Application Manifest** defines the basic application configuration such as
     exposed_ports: [8080]
     instance_type: t2.micro
     health_check_http_path: /health
+    filesystems:
+        - type: temporary
+          mountpoint: /tmp
+          size_mb: 100
 
 AWS Minion stores the application manifest as YAML in the "Manifest" tag on the application's security group (e.g. app-myapp).
 
