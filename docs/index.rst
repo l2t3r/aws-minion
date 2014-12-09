@@ -11,9 +11,8 @@ Contents:
     Command Line Interface <cli>
     Application Manifest <manifest>
     Network Setup <network-setup>
+    Application Setup <application-setup>
     Troubleshooting <troubleshooting>
-
-
 
 Indices and tables
 ==================

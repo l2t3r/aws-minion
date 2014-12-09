@@ -34,6 +34,8 @@ You need to enter:
 * Loggly credentials (optional)
 
 
+.. _creating_an_application:
+
 Creating an Application
 =======================
 

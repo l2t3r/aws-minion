@@ -94,7 +94,6 @@ Building HTML documentation locally:
 
     $ python3 setup.py docs
 
-
 ToDos
 =====
 
