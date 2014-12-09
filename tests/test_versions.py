@@ -64,6 +64,7 @@ def test_versions_create(monkeypatch):
     context.get_versions = lambda: [version]
     context.get_application = lambda x: app
     context.get_security_group = lambda x: security_groups.get(x)
+    context.get_vpc_config = lambda: {'nameservers': ['8.8.8.8']}
     context_constructor = lambda x, y: context
 
     monkeypatch.setattr('aws_minion.cli.Context', context_constructor)
