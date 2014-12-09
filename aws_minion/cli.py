@@ -769,6 +769,10 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
 
 
 def generate_volume_options(app_folder: str, manifest: dict) -> str:
+    """
+    >>> generate_volume_options('myapp', {'filesystems': [{'mountpoint': '/tmp'}]})
+    '-v /data/myapp/1:/tmp'
+    """
     options = []
     i = 1
     for fs in manifest.get('filesystems', []):

@@ -84,6 +84,14 @@ def test_map_subnets_empty():
     assert res == {'public': [], 'shared': [], 'private': []}
 
 
+def test_map_subnets():
+    public_subnet = MagicMock(id='public')
+    shared_subnet = MagicMock(tags={'Name':'Shared Subnet'})
+    route_table = MagicMock(routes=[MagicMock(gateway_id='igw-123')], associations=[MagicMock(subnet_id='public')])
+    res = map_subnets([public_subnet, shared_subnet], [route_table])
+    assert res == {'public': [public_subnet], 'shared': [shared_subnet], 'private': []}
+
+
 def test_versions_traffic(monkeypatch):
     monkeypatch.setattr('boto.vpc.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
