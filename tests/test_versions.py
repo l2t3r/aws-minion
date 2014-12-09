@@ -79,6 +79,44 @@ def test_versions_create(monkeypatch):
     assert 'ABORTED. Default health check time to wait for members to become active has been exceeded.' in result.output
 
 
+def test_versions_delete(monkeypatch):
+    vpc_conn = MagicMock()
+
+    monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.route53.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.ec2.elb.connect_to_region', MagicMock())
+    monkeypatch.setattr('time.sleep', lambda s: s)
+
+    security_group = MagicMock()
+    security_group.tags = {'Manifest': json.dumps({'exposed_ports': [8080], 'team_name': 'MyTeam'})}
+
+    auto_scaling_group = MagicMock()
+    auto_scaling_group.tags = [MagicMock(key='DockerImage', value='foo/bar:123')]
+    auto_scaling_group.desired_capacity = 3
+
+    app = Application('myapp', security_group)
+
+    version = ApplicationVersion('myregion', 'myapp', '1.0', auto_scaling_group)
+    version.weight = 120
+
+    context = Context({'region': 'caprica', 'vpc': 'myvpc', 'domain': 'mydomain'})
+    context.get_versions = lambda a, b=None: [version]
+    context.get_application = lambda x: app
+    context_constructor = lambda x, y: context
+
+    monkeypatch.setattr('aws_minion.cli.Context', context_constructor)
+
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        context.write_config('config.yaml')
+        result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'versions', 'delete', 'myapp', '1.0'],
+                               catch_exceptions=False)
+
+    assert 'Deleting load balancer.. OK' in result.output
+
+
 def test_map_subnets_empty():
     res = map_subnets([], [])
     assert res == {'public': [], 'shared': [], 'private': []}
