@@ -80,9 +80,12 @@ def test_versions_create(monkeypatch):
 
 
 def test_versions_delete(monkeypatch):
-    vpc_conn = MagicMock()
 
-    monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
+    instances = [MagicMock(state='TERMINATED', id='instance-1')]
+
+    conn = MagicMock(get_only_instances=lambda instance_ids: instances)
+
+    monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock(return_value=conn))
     monkeypatch.setattr('boto.route53.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.autoscale.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.ec2.elb.connect_to_region', MagicMock())
@@ -93,7 +96,7 @@ def test_versions_delete(monkeypatch):
 
     auto_scaling_group = MagicMock()
     auto_scaling_group.tags = [MagicMock(key='DockerImage', value='foo/bar:123')]
-    auto_scaling_group.desired_capacity = 3
+    auto_scaling_group.instances = [MagicMock(instance_id='instance-1')]
 
     app = Application('myapp', security_group)
 
