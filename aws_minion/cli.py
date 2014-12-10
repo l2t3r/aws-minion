@@ -927,7 +927,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     with Action('Creating launch configuration for {application_name} version {application_version}..', **vars()):
         lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
-                                 image_id=AMI_ID,
+                                 image_id=vpc_config.get('ami_id', AMI_ID),
                                  key_name=key_name,
                                  security_groups=[sg.id],
                                  user_data=init_script.encode('utf-8'),
