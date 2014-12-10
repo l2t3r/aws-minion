@@ -31,7 +31,7 @@ def test_configure(monkeypatch):
                 aws_access_key_id     = mykey
                 aws_secret_access_key = mysecret
                 '''))
-        result = runner.invoke(cli, ['configure', '--region', 'non-existing-region'], catch_exceptions=False)
+        result = runner.invoke(cli, ['configure', '--region', 'non-existing-region'], catch_exceptions=False, input='1')
 
     assert 'Connecting to region non-existing-region.. FAILED' in result.output
     assert result.exit_code == 0

@@ -144,20 +144,21 @@ def cli(ctx, config_file, profile):
 def ensure_aws_credentials(region):
     extra_config = {}
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
-    if not os.path.exists(credentials_path):
-        options = ['Use existing AWS Access Key', 'Perform SAML login']
-        selection = choice('AWS credentials file not found. Use existing access key or SAML login?', options)
-        if 'SAML' in selection:
-            region = region or click.prompt('AWS Region ID (e.g "eu-west-1")')
-            url = click.prompt('SAML Identity Provider URL')
-            user = click.prompt('SAML Username')
-            saml_login(region, url, user, overwrite_credentials=True)
-            extra_config['saml_identity_provider_url'] = url
-            extra_config['saml_user'] = user
-        else:
-            key_id = click.prompt('AWS Access Key ID')
-            secret = click.prompt('AWS Secret Access Key', hide_input=True)
-            write_aws_credentials(key_id, secret)
+    file_exists = os.path.exists(credentials_path)
+    options = ['Use existing AWS Access Key', 'Perform SAML login']
+    selection = choice('AWS credentials file {}found. Use existing access key or SAML login?'.format(
+                       '' if file_exists else 'not '), options)
+    if 'SAML' in selection:
+        region = region or click.prompt('AWS Region ID (e.g "eu-west-1")')
+        url = click.prompt('SAML Identity Provider URL')
+        user = click.prompt('SAML Username')
+        saml_login(region, url, user, overwrite_credentials=True)
+        extra_config['saml_identity_provider_url'] = url
+        extra_config['saml_user'] = user
+    elif not file_exists:
+        key_id = click.prompt('AWS Access Key ID')
+        secret = click.prompt('AWS Secret Access Key', hide_input=True)
+        write_aws_credentials(key_id, secret)
     return region, extra_config
 
 
