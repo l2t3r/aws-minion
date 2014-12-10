@@ -10,6 +10,7 @@ Contents:
     Quickstart <quickstart>
     Command Line Interface <cli>
     Application Manifest <manifest>
+    VPC Configuration <vpc>
     Network Setup <network-setup>
     Application Setup <application-setup>
     Troubleshooting <troubleshooting>

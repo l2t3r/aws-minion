@@ -45,6 +45,7 @@ def test_versions_create(monkeypatch):
     monkeypatch.setattr('boto.ec2.elb.connect_to_region', MagicMock())
     monkeypatch.setattr('time.sleep', lambda s: s)
     monkeypatch.setattr('aws_minion.cli.map_subnets', lambda s, r: {'public': [subnet], 'shared': [], 'private': []})
+    monkeypatch.setattr('aws_minion.cli.docker_image_exists', lambda i: True)
 
     security_group = MagicMock()
     security_group.tags = {'Manifest': json.dumps({'exposed_ports': [8080], 'team_name': 'MyTeam'})}
@@ -64,7 +65,9 @@ def test_versions_create(monkeypatch):
     context.get_versions = lambda: [version]
     context.get_application = lambda x: app
     context.get_security_group = lambda x: security_groups.get(x)
-    context.get_vpc_config = lambda: {'nameservers': ['8.8.8.8']}
+    context.get_vpc_config = lambda: {'nameservers': ['8.8.8.8'], 'cacerts': ['https://example.org/cacert.pem'],
+                                      'registry': 'example.org',
+                                      'registry_insecure': True}
     context_constructor = lambda x, y: context
 
     monkeypatch.setattr('aws_minion.cli.Context', context_constructor)

@@ -2,7 +2,6 @@
 import shlex
 import collections
 import os
-import socket
 from textwrap import dedent
 import time
 import re
@@ -849,17 +848,22 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         for nameserver in nameservers:
             dns_setup += 'echo "nameserver {}" >> /etc/resolv.conf\n'.format(nameserver)
 
+    cacerts = vpc_config.get('cacerts')
+    ca_setup = ''
+    if cacerts:
+        for url in cacerts:
+            ca_setup += 'curl -s {} >> /etc/ssl/certs/ca-certificates.crt\n'.format(url)
+
     registry = extract_registry(docker_image) or vpc_config.get('registry')
     registry_setup = ''
 
     if registry:
         with Action('Checking Docker registry {registry}..', registry=registry) as act:
             docker_image = replace_registry(docker_image, registry)
-            registry_hostname = registry.split(':')[0]
-            registry_ip = socket.gethostbyname(registry_hostname)
-            registry_setup = '''
-                echo 'DOCKER_OPTS="--insecure-registry {registry_hostname}"' > /etc/default/docker
-                '''.format(registry_ip=registry_ip, registry_hostname=registry_hostname)
+            if vpc_config.get('registry_insecure'):
+                registry_setup = '''
+                    echo 'DOCKER_OPTS="--insecure-registry {registry_hostname}"' > /etc/default/docker
+                    '''.format(registry_hostname=registry)
             if not docker_image_exists(docker_image):
                 act.error('DOCKER IMAGE NOT FOUND')
                 return
@@ -872,6 +876,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     IP=$(ip -o -4 a show eth0 | awk '{{ print $4 }}' | cut -d/ -f 1)
     echo $IP $(hostname) >> /etc/hosts
     {dns_setup}
+    {ca_setup}
 
     # TODO: Disk Setup (EC2 Instance Storage)
     if [ -b /dev/xvdb ]; then
@@ -919,6 +924,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                 env_options=generate_env_options(env_vars),
                 log_shipper_script=shlex.quote(log_shipper_script),
                 dns_setup=dns_setup,
+                ca_setup=ca_setup,
                 registry_setup=registry_setup,
                 volume_options=generate_volume_options(dns_name, manifest))
 
