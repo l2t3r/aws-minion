@@ -59,3 +59,25 @@ def test_list_applications(monkeypatch):
 
     lines = result.output.splitlines()
     assert lines[1].split() == ['myapp', 'MyTeam', '[123]']
+
+
+def test_delete_application(monkeypatch):
+    monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
+    monkeypatch.setattr('boto.iam.connect_to_region', MagicMock())
+
+    context = Context({'region': 'caprica', 'vpc': 'myvpc'})
+    security_group = MagicMock()
+    security_group.tags = {'Manifest': yaml.dump({'application_name': 'myapp'})}
+    context.get_application = lambda name: Application('myapp', security_group)
+    context.get_security_group = lambda name: None
+
+    context_constructor = lambda x, y: context
+
+    monkeypatch.setattr('aws_minion.cli.Context', context_constructor)
+
+    runner = CliRunner()
+
+    with runner.isolated_filesystem():
+        context.write_config('config.yaml')
+
+        result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'app', 'delete', 'myapp'], catch_exceptions=False)

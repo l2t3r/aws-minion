@@ -1204,7 +1204,8 @@ def delete(ctx, application_name: str):
     with Action('Deleting LB security group..'):
         lb_sg_name = 'app-{}-lb'.format(application_name)
         lb_sg = ctx.obj.get_security_group(lb_sg_name)
-        lb_sg.delete()
+        if lb_sg:
+            lb_sg.delete()
 
 
 @versions.command('logs')
