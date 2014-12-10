@@ -26,11 +26,11 @@ AWS Minion requires Python 3.4+ and was only tested on Ubuntu 14.04 and Mac OS X
 Installing
 ==========
 
-Install from PyPI:
+Install from PyPI_:
 
 .. code-block:: bash
 
-    $ sudo pip3 install aws-minion
+    $ sudo pip3 install --upgrade aws-minion
 
 Install from source:
 
@@ -103,5 +103,6 @@ ToDos
 * support private Docker registry with authentication
 
 
+.. _PyPI: https://pypi.python.org/pypi/aws-minion
 .. _AWS Minion Documentation on Read the Docs: http://aws-minion.readthedocs.org/
 
