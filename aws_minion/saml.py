@@ -76,6 +76,9 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
         saml_xml = get_saml_response(response2.text)
         if not saml_xml:
             act.error('LOGIN FAILED')
+            click.secho('SAML login with user "{}" failed, please check your username and password.\n'.format(user) +
+                        'You might need to change the password in your keyring (e.g. Mac OS X keychain) ' +
+                        'or use the "--password" option.', bold=True, fg='blue')
             return
 
     keyring.set_password(keyring_key, user, password)
