@@ -1098,20 +1098,21 @@ def create(ctx, manifest_file):
             key.save(key_dir)
 
     with Action('Creating application security group {sg_name}..', **vars()):
-        sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
+        app_sg = conn.create_security_group(sg_name, 'Application security group', vpc_id=vpc)
         # HACK: add manifest as tag
-        sg.add_tags({'Name': sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest), 'CreatedTime': format_time()})
+        app_sg.add_tags({'Name': sg_name,
+                         'Team': team_name,
+                         'Manifest': yaml.dump(manifest),
+                         'CreatedTime': format_time()})
 
         rules = [
             SecurityGroupRule("tcp", 22, 22, "0.0.0.0/0", None),
-            # TODO: restrict access to private subnets
-            SecurityGroupRule("tcp", manifest['exposed_ports'][0], manifest['exposed_ports'][0], "0.0.0.0/0", None),
             # allow accessing all ports from within the same security group
             SecurityGroupRule("tcp", 0, 65535, None, sg_name)
         ]
 
         for rule in rules:
-            modify_sg(ctx.obj, sg, rule, authorize=True)
+            modify_sg(ctx.obj, app_sg, rule, authorize=True)
 
     lb_sg_name = sg_name + '-lb'
     with Action('Creating LB security group {lb_sg_name}..', **vars()):
@@ -1126,6 +1127,10 @@ def create(ctx, manifest_file):
 
         for rule in rules:
             modify_sg(ctx.obj, sg, rule, authorize=True)
+
+        # allow accessing the "exposed" application ports only from the ELB
+        for port in manifest['exposed_ports']:
+            modify_sg(ctx.obj, app_sg, SecurityGroupRule("tcp", port, port, None, lb_sg_name), authorize=True)
 
     with Action('Creating IAM role and instance profile..'):
         iam_conn = boto.iam.connect_to_region(region)
