@@ -1145,8 +1145,7 @@ def create(ctx, manifest_file):
             ]
         elif server_type == 'tcp':
             exposed_port = manifest['exposed_ports'][0]
-            rules = [ SecurityGroupRule("tcp", exposed_port, exposed_port, "0.0.0.0/0", None) ]
-
+            rules = [SecurityGroupRule("tcp", exposed_port, exposed_port, "0.0.0.0/0", None)]
 
         for rule in rules:
             modify_sg(ctx.obj, sg, rule, authorize=True)
