@@ -949,8 +949,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     if not lb_sg:
         raise Exception('LB security group not found')
 
-    server_type = manifest.get('server_type', 'http')
-    hc_target_template = 'TCP:{port}' if server_type == 'tcp' else 'HTTP:{port}{path}'
+    exposed_protocol = manifest.get('exposed_protocol', 'http')
+    hc_target_template = 'TCP:{port}' if exposed_protocol == 'tcp' else 'HTTP:{port}{path}'
     hc_target = hc_target_template.format(port=manifest['exposed_ports'][0],
                                           path=manifest.get('health_check_http_path', '/'))
     hc = HealthCheck(
@@ -962,12 +962,12 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     with Action('Creating load balancer for {application_name} version {application_version}..', **vars()):
         ssl_cert_arn = ctx.obj.config.get('ssl_certificate_arn')
-        if ssl_cert_arn and server_type == 'http':
+        if ssl_cert_arn and exposed_protocol == 'http':
             ports = [(443, manifest['exposed_ports'][0], 'https', ssl_cert_arn)]
-        elif server_type == 'http':
+        elif exposed_protocol == 'http':
             ports = [(80, manifest['exposed_ports'][0], 'http')]
         else:
-            ports = [(manifest['exposed_ports'][0], manifest['exposed_ports'][0], server_type)]
+            ports = [(manifest['exposed_ports'][0], manifest['exposed_ports'][0], exposed_protocol)]
         elb_conn = boto.ec2.elb.connect_to_region(region)
         lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
                                            scheme='internet-facing' if elb_layer == 'public' else 'internal',
@@ -1059,7 +1059,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
             ok()
     else:
         ok()
-        if server_type == 'http':
+        if exposed_protocol == 'http':
             location_message = 'Application version URL is http{}://{}'.format('s' if ssl_cert_arn else '', fqdn)
         else:
             location_message = 'Application version available at {}'.format(fqdn)
@@ -1136,14 +1136,14 @@ def create(ctx, manifest_file):
         # HACK: add manifest as tag
         sg.add_tags({'Name': lb_sg_name, 'Team': team_name, 'Manifest': yaml.dump(manifest)})
 
-        server_type = manifest.get('server_type', 'http')
+        exposed_protocol = manifest.get('exposed_protocol', 'http')
 
-        if server_type == 'http':
+        if exposed_protocol == 'http':
             rules = [
                 SecurityGroupRule("tcp", 80, 80, "0.0.0.0/0", None),
                 SecurityGroupRule("tcp", 443, 443, "0.0.0.0/0", None),
             ]
-        elif server_type == 'tcp':
+        elif exposed_protocol == 'tcp':
             exposed_port = manifest['exposed_ports'][0]
             rules = [SecurityGroupRule("tcp", exposed_port, exposed_port, "0.0.0.0/0", None)]
 
