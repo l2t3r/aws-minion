@@ -33,18 +33,21 @@ Manifest Configuration Keys
     List of exposed TCP port numbers.
 
 ``exposed_protocol``
-    Which protocol is exposed by the application.
+    Which protocol is exposed by the application. Valid values are ``http`` and ``tcp`` (default is ``http``):
 
-    If the exposed protocol is ``http`` the load balancer will expose https in port ``443`` if a certificate was
-    provided in the configuration or http in port ``80`` otherwise, and use HTTP health check.
+    If the exposed protocol is ``http``, the load balancer will expose HTTPS on port 443 if a certificate was
+    provided in the configuration or plain HTTP on port 80 otherwise. The load balancer will perform a HTTP health check by checking for HTTP status 200.
+    Use the ``health_check_http_path`` to configure which HTTP path to check (default is ``/``).
 
-    If the exposed protocol is ``tcp`` the load balancer will expose ``exposed_ports`` and use TCP health check.
+    If the exposed protocol is ``tcp``, the load balancer will expose the first port listed in the ``exposed_ports`` configuration.
+    The load balancer will try to perform a TCP connect as health check in this case.
 
 ``instance_type``
-    The EC2 instance type (e.g. ``t2.micro`` or ``m3.large``).
+    The EC2 instance type (e.g. ``t2.micro`` or ``m3.large``). Default is ``t2.micro``.
 
-``health-check-http-path``
+``health_check_http_path``
     HTTP path for HTTP health check mode. Performs GET requests to the given path and waits for status code 200.
+    Default is ``/``.
 
 ``filesystems``
     List of filesystem volumes. Each filesystem must be a map with the keys ``type``, ``mountpoint`` and ``size_mb``.
