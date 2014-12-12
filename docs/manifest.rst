@@ -10,6 +10,7 @@ The **Application Manifest** defines the basic application configuration such as
     application_name: myapp
     team_name: MyOrganization/MyTeam
     exposed_ports: [8080]
+    exposed_protocol: http
     instance_type: t2.micro
     health_check_http_path: /health
     filesystems:
@@ -30,6 +31,14 @@ Manifest Configuration Keys
 
 ``exposed_ports``
     List of exposed TCP port numbers.
+
+``exposed_protocol``
+    Which protocol is exposed by the application.
+
+    If the exposed protocol is ``http`` the load balancer will expose https in port ``443`` if a certificate was
+    provided in the configuration or http in port ``80`` otherwise, and use HTTP health check.
+
+    If the exposed protocol is ``tcp`` the load balancer will expose ``exposed_ports`` and use TCP health check.
 
 ``instance_type``
     The EC2 instance type (e.g. ``t2.micro`` or ``m3.large``).
