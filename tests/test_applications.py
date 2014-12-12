@@ -1,6 +1,6 @@
 import json
 from click.testing import CliRunner
-from mock import MagicMock
+from mock import MagicMock, call
 import yaml
 from aws_minion.cli import cli
 from aws_minion.context import Context, ApplicationNotFound, Application
@@ -9,10 +9,13 @@ from aws_minion.context import Context, ApplicationNotFound, Application
 def raise_application_not_found(x):
     raise ApplicationNotFound('blub')
 
+
 def test_create_application(monkeypatch):
     monkeypatch.setattr('boto.ec2.connect_to_region', MagicMock())
     monkeypatch.setattr('boto.iam.connect_to_region', MagicMock())
     monkeypatch.setattr('time.sleep', lambda s: s)
+    mock_sgr = MagicMock()
+    monkeypatch.setattr('aws_minion.cli.SecurityGroupRule', mock_sgr)
 
     context = Context({'region': 'caprica', 'vpc': 'myvpc'})
     context.get_application = raise_application_not_found
@@ -25,8 +28,11 @@ def test_create_application(monkeypatch):
     data = {
         'application_name': 'myapp',
         'team_name': 'MyTeam',
-        'exposed_ports': [123]
+        'exposed_ports': [123],
+        'exposed_protocol': 'http'
     }
+
+    mock_sgr.reset_mock()
 
     with runner.isolated_filesystem():
         with open('myapp.yaml', 'w') as fd:
@@ -36,6 +42,29 @@ def test_create_application(monkeypatch):
 
         result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'applications', 'create', 'myapp.yaml'], catch_exceptions=False)
 
+    assert call('tcp', 80, 80, '0.0.0.0/0', None) in mock_sgr.call_args_list
+    assert call('tcp', 443, 443, '0.0.0.0/0', None) in mock_sgr.call_args_list
+
+    assert 'Creating IAM role and instance profile.. OK' in result.output
+
+    data_tcp = {
+        'application_name': 'myapp',
+        'team_name': 'MyTeam',
+        'exposed_ports': [123],
+        'exposed_protocol': 'tcp'
+    }
+
+    mock_sgr.reset_mock()
+
+    with runner.isolated_filesystem():
+        with open('myapp.yaml', 'w') as fd:
+            yaml.dump(data_tcp, fd)
+
+        context.write_config('config.yaml')
+
+        result = runner.invoke(cli, ['-p', 'default', '--config-file', 'config.yaml', 'applications', 'create', 'myapp.yaml'], catch_exceptions=False)
+
+    assert mock_sgr.call_args == call('tcp', 123, 123, None, 'app-myapp-lb')
     assert 'Creating IAM role and instance profile.. OK' in result.output
 
 

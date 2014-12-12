@@ -64,6 +64,10 @@ def validate_application_name(ctx, param, value):
     """
     >>> validate_application_name(None, None, 'foo-bar')
     'foo-bar'
+    >>> validate_application_name(None, None, 'foo bar')
+    Traceback (most recent call last):
+        ...
+    click.exceptions.BadParameter: invalid application name (allowed: ^[a-z][a-z0-9-]{,199}$)
     """
     match = APPLICATION_NAME_PATTERN.match(value)
     if not match:
@@ -75,6 +79,10 @@ def validate_application_version(ctx, param, value):
     """
     >>> validate_application_version(None, None, '1.0')
     '1.0'
+    >>> validate_application_version(None, None, 'foo bar')
+    Traceback (most recent call last):
+        ...
+    click.exceptions.BadParameter: invalid app version (allowed: ^[a-zA-Z0-9.]{1,200}$)
     """
     match = APPLICATION_VERSION_PATTERN.match(value)
     if not match:
@@ -86,6 +94,10 @@ def validate_vpc_id(ctx, param, value):
     """
     >>> validate_vpc_id(None, None, 'vpc-abc123')
     'vpc-abc123'
+    >>> validate_vpc_id(None, None, 'abc123')
+    Traceback (most recent call last):
+        ...
+    click.exceptions.BadParameter: invalid VPC ID (allowed: ^vpc-[a-z0-9]+$)
     """
     match = VPC_ID_PATTERN.match(value)
     if not match:
