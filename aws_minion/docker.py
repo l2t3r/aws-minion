@@ -153,13 +153,12 @@ def docker_image_exists(docker_image: str) -> bool:
 
     for scheme in 'https', 'http':
         try:
-            url = '{scheme}://{registry}/v1/repositories/{repo}/tags/{tag}'.format(scheme=scheme,
-                                                                                   registry=registry,
-                                                                                   repo=repo,
-                                                                                   tag=tag)
+            url = '{scheme}://{registry}/v1/repositories/{repo}/tags'.format(scheme=scheme,
+                                                                             registry=registry,
+                                                                             repo=repo)
             r = requests.get(url, timeout=5, verify=False)
             result = r.json()
-            return isinstance(result, str)
+            return tag in result
         except:
             pass
     return False
