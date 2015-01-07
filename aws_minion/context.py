@@ -225,7 +225,6 @@ class Context:
         Get all versions defined for the given application_name and application_version strings.
         """
         autoscale = boto.ec2.autoscale.connect_to_region(self.region)
-        groups = autoscale.get_all_groups()
         rows = []
 
         dns_conn = boto.route53.connect_to_region(self.region)
@@ -240,18 +239,26 @@ class Context:
                     weights[r.identifier] = int(r.weight)
 
         # TODO: the list of auto scaling groups should be filtered by VPC
-        for group in groups:
-            if group.name.startswith(IDENTIFIER_PREFIX):
-                _application_name, _application_version = group.name[len(IDENTIFIER_PREFIX):].rsplit('-', 1)
-                if application_name and _application_name != application_name:
-                    continue
+        next_token = None
+        while True:
+            groups = autoscale.get_all_groups(next_token=next_token)
+            for group in groups:
+                if group.name.startswith(IDENTIFIER_PREFIX):
+                    _application_name, _application_version = group.name[len(IDENTIFIER_PREFIX):].rsplit('-', 1)
+                    if application_name and _application_name != application_name:
+                        continue
 
-                if application_version and _application_version != application_version:
-                    continue
+                    if application_version and _application_version != application_version:
+                        continue
 
-                version = ApplicationVersion(self.region, _application_name, _application_version, group)
-                version.weight = weights.get(version.dns_identifier)
-                rows.append(version)
+                    version = ApplicationVersion(self.region, _application_name, _application_version, group)
+                    version.weight = weights.get(version.dns_identifier)
+                    rows.append(version)
+            # use getattr here to support mocking "get_all_groups" with simple "list"
+            if getattr(groups, 'next_token', None):
+                next_token = groups.next_token
+            else:
+                break
         return sorted(rows)
 
     def get_version(self, application_name: str, application_version: str) -> ApplicationVersion:
