@@ -351,7 +351,7 @@ def images(ctx, registry):
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
-@click.option('--no-health-check', is_flag=True, help='Do not check LB instance states (this might be much faster)')
+@click.option('-n', '--no-health-check', is_flag=True, help='Do not check LB instance states (this might be much faster)')
 @click.pass_context
 def versions(ctx, no_health_check):
     """
