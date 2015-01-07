@@ -96,7 +96,7 @@ def prepare_log_shipper_script(application_name, application_version, data):
         f=/etc/rsyslog.d/21-filemonitoring-{application_name}-{application_version}.conf
         (
             echo '$ModLoad imfile'
-            echo '$InputFilePollInterval 10'
+            echo '$InputFilePollInterval 1'
             echo '$WorkDirectory /var/spool/rsyslog'
             echo '$PrivDropToGroup adm'
             echo '$InputFileName /var/log/docker.log'
