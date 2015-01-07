@@ -351,8 +351,9 @@ def images(ctx, registry):
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
+@click.option('--no-health-check', is_flag=True, help='Do not check LB instance states (this might be much faster)')
 @click.pass_context
-def versions(ctx):
+def versions(ctx, no_health_check):
     """
     Manage application versions, list all versions
     """
@@ -362,18 +363,19 @@ def versions(ctx):
         rows = []
         for version in ctx.obj.get_versions():
 
-            lb = version.get_load_balancer()
-            if lb:
-                dns_name = lb.dns_name
-                counter = collections.Counter(i.state for i in lb.get_instance_health())
+            if no_health_check:
+                instance_states = '(unknown)'
             else:
-                dns_name = ''
-                counter = collections.Counter()
+                lb = version.get_load_balancer()
+                if lb:
+                    counter = collections.Counter(i.state for i in lb.get_instance_health())
+                else:
+                    counter = collections.Counter()
 
-            instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
+                instance_states = ', '.join(['{}x {}'.format(count, state) for state, count in counter.most_common(10)])
 
-            if not instance_states:
-                instance_states = '(no instances)'
+                if not instance_states:
+                    instance_states = '(no instances)'
 
             docker_image = version.docker_image
 
@@ -385,7 +387,6 @@ def versions(ctx):
                          'docker_image': docker_image,
                          'instance_states': instance_states,
                          'desired_capacity': version.auto_scaling_group.desired_capacity,
-                         'dns_name': dns_name,
                          'weight': version.weight / PERCENT_RESOLUTION if version.weight else None,
                          'created_time': parse_time(version.auto_scaling_group.created_time)})
 
