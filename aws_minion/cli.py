@@ -351,7 +351,8 @@ def images(ctx, registry):
 
 
 @cli.group(cls=AliasedGroup, invoke_without_command=True)
-@click.option('-n', '--no-health-check', is_flag=True, help='Do not check LB instance states (this might be much faster)')
+@click.option('-n', '--no-health-check', is_flag=True,
+              help='Do not check LB instance states (this might be much faster)')
 @click.pass_context
 def versions(ctx, no_health_check):
     """
@@ -914,20 +915,24 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     {registry_setup}
 
-    # add Docker repo
-    apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
-    echo 'deb https://get.docker.io/ubuntu docker main' > /etc/apt/sources.list.d/docker.list
+    # we assume everything is installed if the Docker executable exists
+    if [ ! -x /usr/bin/docker ]; then
+        # add Docker repo
+        apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
+        echo 'deb https://get.docker.io/ubuntu docker main' > /etc/apt/sources.list.d/docker.list
 
-    apt-get update
+        apt-get update
 
-    apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" apparmor lxc-docker rsyslog-gnutls
-    adduser ubuntu docker
+        apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" \
+            apparmor lxc-docker rsyslog-gnutls
+        adduser ubuntu docker
+    fi
 
     until docker pull {docker_image}; do
         echo 'Docker pull failed, retrying..'
         sleep 3
     done
-    containerId=$(docker run -d {env_options} {volume_options} --net=host {docker_image})
+    containerId=$(docker run -d {env_options} {volume_options} --net=host --name={hostname} {docker_image})
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
