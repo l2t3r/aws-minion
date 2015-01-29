@@ -92,7 +92,7 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
     if len(roles) == 1:
         provider_arn, role_arn = roles[0]
     elif role:
-        matching_roles = [_role for _role in roles if role in str(_role)]
+        matching_roles = [_role for _role in roles if role in get_role_label(_role)]
         if not matching_roles or len(matching_roles) > 1:
             raise click.UsageError('Given role (--role) was not found or not unique')
         provider_arn, role_arn = matching_roles[0]

@@ -177,6 +177,10 @@ class Context:
     def saml_user(self):
         return self.config.get('saml_user')
 
+    @property
+    def saml_role(self):
+        return self.config.get('saml_role')
+
     def write_config(self, path):
         try:
             # load all configs (all profiles)

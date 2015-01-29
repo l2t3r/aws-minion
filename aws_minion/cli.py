@@ -1287,7 +1287,7 @@ def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
 @click.option('--user', '-U', help='SAML Username', metavar='USERNAME')
 @click.option('--password', '-p', help='SAML Password', metavar='PWD')
 @click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
-@click.option('--overwrite-credentials', help='Always overwrite AWS credentials file', is_flag=True)
+@click.option('--overwrite-credentials', '-o', help='Always overwrite AWS credentials file', is_flag=True)
 @click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
 @click.pass_context
 def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars):
@@ -1300,6 +1300,7 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
         raise click.UsageError('Please specify SAML identity provider URL in config file or use "--url"')
 
     user = user or ctx.obj.saml_user or click.prompt('SAML Username')
+    role = role or ctx.obj.saml_role
 
     saml_login(ctx.obj.region, url, user, password, role, overwrite_credentials, print_env_vars)
 
