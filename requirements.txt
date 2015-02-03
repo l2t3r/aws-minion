@@ -1,5 +1,5 @@
 boto==2.34.0
-botocore==0.68.0
+botocore>=0.68.0
 paramiko==1.15.1
 click==3.3
 PyYAML==3.11
