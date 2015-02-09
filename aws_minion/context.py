@@ -130,7 +130,8 @@ class ApplicationVersion:
             return None
 
     def __lt__(self, other):
-        key = lambda v: (v.application_name, ComparableLooseVersion(self.version), )
+        def key(v):
+            return (v.application_name, ComparableLooseVersion(self.version), )
         return key(self) < key(other)
 
     def __eq__(self, other):
