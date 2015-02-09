@@ -30,7 +30,7 @@ from aws_minion.console import print_table, action, ok, error, warning, choice, 
 from aws_minion.context import Context, ApplicationNotFound, Application, APPLICATION_NAME_PATTERN, \
     APPLICATION_VERSION_PATTERN
 from aws_minion.docker import is_docker_image_valid, generate_env_options, extract_registry, replace_registry, \
-    docker_image_exists, search_docker_images
+    docker_image_exists, search_docker_images, generate_cap_add_options
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
     prepare_log_shipper_script
 from aws_minion.saml import saml_login
@@ -801,11 +801,12 @@ def generate_volume_options(app_folder: str, manifest: dict) -> str:
 @click.argument('application-version', callback=validate_application_version)
 @click.argument('docker-image')
 @click.option('--env', '-e', multiple=True, help='Environment variable(s) to pass to "docker run"', metavar='KEY=VAL')
+@click.option('--cap-add', '-ca', multiple=True, help='Add Linux capabilities', metavar='CAP_TO_ADD')
 @click.option('--public', is_flag=True, help='Launch instances and ELB in public subnet')
 @click.option('--instance-type', help='Use custom EC2 instance type', metavar='EC2_TYPE')
 @click.pass_context
-def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, public: bool,
-                   instance_type: str):
+def create_version(ctx, application_name: str, application_version: str, docker_image: str, env: list, cap_add: list,
+                   public: bool, instance_type: str):
     """
     Create a new application version
     """
@@ -932,7 +933,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         echo 'Docker pull failed, retrying..'
         sleep 3
     done
-    containerId=$(docker run -d {env_options} {volume_options} --net=host --name={hostname} {docker_image})
+    containerId=$(docker run -d {add_linux_capabilities} {env_options} {volume_options} --net=host --name={hostname} \
+        {docker_image})
 
     echo {log_shipper_script} > /tmp/log-shipper.sh
     bash /tmp/log-shipper.sh $containerId
@@ -944,7 +946,8 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                 dns_setup=dns_setup,
                 ca_setup=ca_setup,
                 registry_setup=registry_setup,
-                volume_options=generate_volume_options(dns_name, manifest))
+                volume_options=generate_volume_options(dns_name, manifest),
+                add_linux_capabilities=generate_cap_add_options(cap_add))
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
