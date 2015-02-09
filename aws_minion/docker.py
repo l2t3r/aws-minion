@@ -185,3 +185,23 @@ def search_docker_images(registry: str, q: str) -> list:
         except:
             pass
     return images
+
+
+def generate_cap_add_options(capabilities_to_add: list) -> str:
+    """
+    Generate a list of capabilities to enable (--cap-add) in Docker container
+
+    >>> generate_cap_add_options([])
+    ''
+
+    >>> generate_cap_add_options(['NET_ADMIN'])
+    '--cap-add NET_ADMIN'
+
+    >>> generate_cap_add_options(['NET_ADMIN', 'SYSLOG'])
+    '--cap-add NET_ADMIN --cap-add SYSLOG'
+    """
+    capabilities = []
+    for capability in capabilities_to_add:
+        capabilities.append('--cap-add {}'.format(capability))
+
+    return ' '.join(capabilities)
