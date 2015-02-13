@@ -856,29 +856,11 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     dns_name = 'app-{}-{}'.format(application_name, application_version.replace('.', '-'))
     fqdn = '{}-{}.{}'.format(application_name, application_version.replace('.', '-'), domain)
 
-    nameservers = vpc_config.get('nameservers')
-    dns_setup = ''
-    if nameservers:
-        dns_setup = 'echo > /etc/resolv.conf\n'
-        for nameserver in nameservers:
-            dns_setup += 'echo "nameserver {}" >> /etc/resolv.conf\n'.format(nameserver)
-
-    cacerts = vpc_config.get('cacerts')
-    ca_setup = ''
-    if cacerts:
-        for url in cacerts:
-            ca_setup += 'curl -s {} >> /etc/ssl/certs/ca-certificates.crt\n'.format(url)
-
     registry = extract_registry(docker_image) or vpc_config.get('registry')
-    registry_setup = ''
 
     if registry:
         with Action('Checking Docker registry {registry}..', registry=registry) as act:
             docker_image = replace_registry(docker_image, registry)
-            if vpc_config.get('registry_insecure'):
-                registry_setup = '''
-                    echo 'DOCKER_OPTS="--insecure-registry {registry_hostname}"' > /etc/default/docker
-                    '''.format(registry_hostname=registry)
             if not docker_image_exists(docker_image):
                 act.error('DOCKER IMAGE NOT FOUND')
                 return
@@ -890,8 +872,6 @@ def create_version(ctx, application_name: str, application_version: str, docker_
     hostname {hostname}-$iid
     IP=$(ip -o -4 a show eth0 | awk '{{ print $4 }}' | cut -d/ -f 1)
     echo $IP $(hostname) >> /etc/hosts
-    {dns_setup}
-    {ca_setup}
 
     # TODO: Disk Setup (EC2 Instance Storage)
     if [ -b /dev/xvdb ]; then
@@ -913,8 +893,6 @@ def create_version(ctx, application_name: str, application_version: str, docker_
             chmod 777 /data/{hostname}/$i
         done
     fi
-
-    {registry_setup}
 
     # we assume everything is installed if the Docker executable exists
     if [ ! -x /usr/bin/docker ]; then
@@ -943,9 +921,6 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                 exposed_port=manifest['exposed_ports'][0],
                 env_options=generate_env_options(env_vars),
                 log_shipper_script=shlex.quote(log_shipper_script),
-                dns_setup=dns_setup,
-                ca_setup=ca_setup,
-                registry_setup=registry_setup,
                 volume_options=generate_volume_options(dns_name, manifest),
                 add_linux_capabilities=generate_cap_add_options(cap_add))
 
