@@ -427,8 +427,8 @@ def instances(ctx):
         now = time.time()
         rows.sort(key=lambda x: (x['application_name'],
                                  ComparableLooseVersion(x['application_version']), now - x['launch_time']))
-        print_table(('application_name application_version instance_id team '
-                    + 'public_ip private_ip state launch_time').split(), rows)
+        print_table(('application_name application_version instance_id team ' +
+                     'public_ip private_ip state launch_time').split(), rows)
 
 
 def get_weights(dns_name: str, identifier: str, rr: ResourceRecordSets) -> ({str: int}, int, int):
