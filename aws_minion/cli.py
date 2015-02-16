@@ -2,7 +2,6 @@
 import shlex
 import collections
 import os
-from textwrap import dedent
 import time
 import re
 from boto.route53.record import ResourceRecordSets
@@ -29,11 +28,13 @@ from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_ti
 from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
 from aws_minion.context import Context, ApplicationNotFound, Application, APPLICATION_NAME_PATTERN, \
     APPLICATION_VERSION_PATTERN
-from aws_minion.docker import is_docker_image_valid, generate_env_options, extract_registry, replace_registry, \
-    docker_image_exists, search_docker_images, generate_cap_add_options
+from aws_minion.docker import is_docker_image_valid, extract_registry, replace_registry, \
+    docker_image_exists, search_docker_images
 from aws_minion.loggly import request_loggly_logs, LOGGLY_TAIL_START_TIME, LOGGLY_REQUEST_SIZE, print_if_app_log, \
     prepare_log_shipper_script
 from aws_minion.saml import saml_login
+from aws_minion.user_data import get_config_yaml
+from aws_minion.user_data import get_bash_script
 from aws_minion.utils import FloatRange, ComparableLooseVersion
 
 # FIXME: hardcoded for eu-west-1: Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
@@ -782,20 +783,6 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
     return by_layer
 
 
-def generate_volume_options(app_folder: str, manifest: dict) -> str:
-    """
-    >>> generate_volume_options('myapp', {'filesystems': [{'mountpoint': '/tmp'}]})
-    '-v /data/myapp/1:/tmp'
-    """
-    options = []
-    i = 1
-    for fs in manifest.get('filesystems', []):
-        options.append('-v')
-        options.append(shlex.quote('/data/{}/{}:{}'.format(app_folder, i, fs.get('mountpoint', '/data'))))
-        i += 1
-    return ' '.join(options)
-
-
 @versions.command('create')
 @click.argument('application-name', callback=validate_application_name)
 @click.argument('application-version', callback=validate_application_version)
@@ -865,64 +852,12 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                 act.error('DOCKER IMAGE NOT FOUND')
                 return
 
-    init_script = dedent('''\
-    #!/bin/bash
-    iid=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-    iid=${{iid/i-}}
-    hostname {hostname}-$iid
-    IP=$(ip -o -4 a show eth0 | awk '{{ print $4 }}' | cut -d/ -f 1)
-    echo $IP $(hostname) >> /etc/hosts
-
-    # TODO: Disk Setup (EC2 Instance Storage)
-    if [ -b /dev/xvdb ]; then
-        umount /dev/xvdb
-        fdisk /dev/xvdb <<EOF
-    o
-    n
-    p
-    1
-
-
-    w
-    EOF
-        mke2fs -F -L "aws-minion-data" -t ext4 -O ^has_journal -m 0 /dev/xvdb1
-        mkdir /data
-        mount /dev/xvdb1 /data
-        for i in $(seq 1 9); do
-            mkdir -p /data/{hostname}/$i
-            chmod 777 /data/{hostname}/$i
-        done
-    fi
-
-    # we assume everything is installed if the Docker executable exists
-    if [ ! -x /usr/bin/docker ]; then
-        # add Docker repo
-        apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9
-        echo 'deb https://get.docker.io/ubuntu docker main' > /etc/apt/sources.list.d/docker.list
-
-        apt-get update
-
-        apt-get install -y --no-install-recommends -o Dpkg::Options::="--force-confold" \
-            apparmor lxc-docker rsyslog-gnutls
-        adduser ubuntu docker
-    fi
-
-    until docker pull {docker_image}; do
-        echo 'Docker pull failed, retrying..'
-        sleep 3
-    done
-    containerId=$(docker run -d {add_linux_capabilities} {env_options} {volume_options} --net=host --name={hostname} \
-        {docker_image})
-
-    echo {log_shipper_script} > /tmp/log-shipper.sh
-    bash /tmp/log-shipper.sh $containerId
-    ''').format(docker_image=docker_image,
-                hostname=dns_name,
-                exposed_port=manifest['exposed_ports'][0],
-                env_options=generate_env_options(env_vars),
-                log_shipper_script=shlex.quote(log_shipper_script),
-                volume_options=generate_volume_options(dns_name, manifest),
-                add_linux_capabilities=generate_cap_add_options(cap_add))
+    ami_type = vpc_config.get('ami_type', 'ubuntu')
+    if ami_type.startswith('config-yaml-'):
+        get_user_data = get_config_yaml
+    else:
+        get_user_data = get_bash_script
+    user_data = get_user_data(docker_image, dns_name, manifest, env_vars, log_shipper_script, cap_add)
 
     autoscale = boto.ec2.autoscale.connect_to_region(region)
 
@@ -933,7 +868,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                                  image_id=vpc_config.get('ami_id', AMI_ID),
                                  key_name=key_name,
                                  security_groups=[sg.id],
-                                 user_data=init_script.encode('utf-8'),
+                                 user_data=user_data.encode('utf-8'),
                                  instance_type=manifest.get('instance_type', instance_type or 't2.micro'),
                                  instance_profile_name=app.identifier,
                                  associate_public_ip_address=(instance_layer == 'public'))
