@@ -265,17 +265,21 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
             act.error('NO SUBNETS')
             return
 
-    if not domain and not data.get('domain'):
-        with Action('Trying to autodetect DNS domain..') as act:
-            dns_conn = boto.route53.connect_to_region(region)
-            if not dns_conn:
-                act.error('CONNECTION FAILED')
-                return
-            zones = dns_conn.get_zones()
-            if len(zones) == 1:
-                data['domain'] = zones[0].name.rstrip('.')
+    with Action('Trying to autodetect DNS domain..') as act:
+        dns_conn = boto.route53.connect_to_region(region)
+        if not dns_conn:
+            act.error('CONNECTION FAILED')
+            return
+        zones = dns_conn.get_zones()
+        domains = [zone.name.rstrip('.') for zone in zones]
 
-    domain = ask('DNS domain', 'domain', suggestion='apps.myorganization.org')
+    if len(domains) > 1:
+        domain = choice('DNS domain', domains)
+    else:
+        if len(domains) == 1:
+            data['domain'] = domains[0]
+
+        domain = ask('DNS domain', 'domain', suggestion='apps.myorganization.org')
 
     with Action('Checking domain {domain}..', **vars()) as act:
         dns_conn = boto.route53.connect_to_region(region)
@@ -284,10 +288,9 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
             act.error('ZONE NOT FOUND')
             return
 
-    if not ssl_certificate_arn and not data.get('ssl_certificate_arn'):
-        with Action('Trying to autodetect SSL certificate..'):
-            temp_context = Context({'region': region, 'domain': domain})
-            data['ssl_certificate_arn'] = temp_context.find_ssl_certificate_arn()
+    with Action('Trying to autodetect SSL certificate..'):
+        temp_context = Context({'region': region, 'domain': domain})
+        data['ssl_certificate_arn'] = temp_context.find_ssl_certificate_arn()
 
     ask('SSL certificate ARN (enter "-" to skip)', 'ssl_certificate_arn',
         suggestion='arn:aws:iam::123:server-certificate/mycert')
