@@ -274,7 +274,8 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
         domains = [zone.name.rstrip('.') for zone in zones]
 
     if len(domains) > 1:
-        domain = choice('DNS domain', domains)
+        domain = choice('Which DNS domain to use?', domains)
+        data['domain'] = domain
     else:
         if len(domains) == 1:
             data['domain'] = domains[0]
