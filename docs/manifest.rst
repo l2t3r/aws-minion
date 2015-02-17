@@ -13,6 +13,7 @@ The **Application Manifest** defines the basic application configuration such as
     exposed_protocol: http
     instance_type: t2.micro
     health_check_http_path: /health
+    root: false
     filesystems:
         - type: temporary
           mountpoint: /tmp
@@ -48,6 +49,9 @@ Manifest Configuration Keys
 ``health_check_http_path``
     HTTP path for HTTP health check mode. Performs GET requests to the given path and waits for status code 200.
     Default is ``/``.
+
+``root``
+    Whether to run the Docker container as "root". Default is false.
 
 ``filesystems``
     List of filesystem volumes. Each filesystem must be a map with the keys ``type``, ``mountpoint`` and ``size_mb``.
