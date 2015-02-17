@@ -84,13 +84,16 @@ def get_bash_script(docker_image, dns_name, manifest, env_vars, log_shipper_scri
 def get_config_yaml(docker_image, dns_name, manifest, env_vars, log_shipper_script, cap_add):
     '''
     >>> get_config_yaml('foo/bar', '', {'exposed_ports': [80]}, {}, '', []).strip()
-    '#zalando-ami-config\\ncapabilities_add: []\\nenvironment: {}\\nports: {80: 80}\\nruntime: Docker\\nsource: foo/bar'
+    '#zalando-ami-config\\ncapabilities_add: []\\nports: {80: 80}\\nruntime: Docker\\nsource: foo/bar'
     '''
     data = {
         'runtime': 'Docker',
         'source': docker_image,
         'ports': {port: port for port in manifest['exposed_ports']},
-        'environment': env_vars,
         'capabilities_add': cap_add
     }
+    if 'root' in manifest:
+        data['root'] = bool(manifest['root'])
+    if env_vars:
+        data['environment'] = env_vars
     return '#zalando-ami-config\n{}'.format(yaml.safe_dump(data))

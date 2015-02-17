@@ -856,10 +856,26 @@ def create_version(ctx, application_name: str, application_version: str, docker_
                 act.error('DOCKER IMAGE NOT FOUND')
                 return
 
-    ami_type = vpc_config.get('ami_type', 'ubuntu')
-    if ami_type.startswith('config-yaml-'):
+    conn = boto.ec2.connect_to_region(region)
+
+    user_data_version = None
+    ami_id = vpc_config.get('ami_id', AMI_ID)
+    with Action('Checking AMI {ami_id}..', **vars()) as act:
+        image = conn.get_image(ami_id)
+        if isinstance(image.description, str):
+            try:
+                descr = yaml.safe_load(image.description)
+                user_data_version = descr.get('user_data_version')
+            except:
+                # ignore invalid non-YAML image description
+                pass
+
+    if user_data_version:
+        click.secho('Good, AMI "{}" supports user data version {}'.format(image.name, user_data_version),
+                    fg='blue', bold=True)
         get_user_data = get_config_yaml
     else:
+        click.secho('Found legacy/unknown AMI. Using Bash user data script.', fg='blue', bold=True)
         get_user_data = get_bash_script
     user_data = get_user_data(docker_image, dns_name, manifest, env_vars, log_shipper_script, cap_add)
 
@@ -869,7 +885,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
 
     with Action('Creating launch configuration for {application_name} version {application_version}..', **vars()):
         lc = LaunchConfiguration(name='app-{}-{}'.format(application_name, application_version),
-                                 image_id=vpc_config.get('ami_id', AMI_ID),
+                                 image_id=image.id,
                                  key_name=key_name,
                                  security_groups=[sg.id],
                                  user_data=user_data.encode('utf-8'),
@@ -904,6 +920,7 @@ def create_version(ctx, application_name: str, application_version: str, docker_
         else:
             ports = [(manifest['exposed_ports'][0], manifest['exposed_ports'][0], exposed_protocol)]
         elb_conn = boto.ec2.elb.connect_to_region(region)
+
         lb = elb_conn.create_load_balancer(dns_name, zones=None, listeners=ports,
                                            scheme='internet-facing' if elb_layer == 'public' else 'internal',
                                            subnets=[subnet.id for subnet in subnets_by_layer[elb_layer]],
