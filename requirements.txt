@@ -1,4 +1,4 @@
-boto==2.34.0
+boto==2.36.0
 botocore>=0.91.0
 paramiko==1.15.1
 click==3.3
