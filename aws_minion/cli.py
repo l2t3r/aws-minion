@@ -249,7 +249,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
 
     if not vpc and not data.get('vpc'):
         with Action('Trying to autodetect VPC..'):
-            vpcs = [v for v in vpc_conn.get_all_vpcs() if not v.is_default]
+            vpcs = [v for v in vpc_conn.get_all_vpcs()]
             if len(vpcs) == 1:
                 data['vpc'] = vpcs[0].id
 
