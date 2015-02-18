@@ -104,6 +104,9 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
     with Action('Assuming role "{role_label}"..', role_label=get_role_label((provider_arn, role_arn))):
         saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
+        # HACK: botocore NEEDS a credentials file, but does not care about its contents
+        write_aws_credentials('123', '123', '123')
+
         session = botocore.session.get_session()
         sts = session.get_service('sts')
         operation = sts.get_operation('AssumeRoleWithSAML')
