@@ -1,0 +1,8 @@
+{
+    "iam": {
+        "eu-central-1": "iam.amazonaws.com"
+    },
+    "route53": {
+        "eu-central-1": "route53.amazonaws.com"
+    }
+}
