@@ -1,4 +1,5 @@
 include *.txt
 include *.rst
-recursive-include aws_minion *.py
+include *.json
+recursive-include aws_minion *.py *.json
 recursive-include docs *.rst *.py

@@ -208,6 +208,7 @@ def setup_package():
         classifiers=CLASSIFIERS,
         test_suite='tests',
         packages=setuptools.find_packages(exclude=['tests', 'tests.*']),
+        package_data = {MAIN_PACKAGE: ["*.json"] },
         install_requires=install_reqs,
         setup_requires=['six', 'flake8'],
         cmdclass=cmdclass,
