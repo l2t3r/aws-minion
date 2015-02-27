@@ -37,6 +37,10 @@ from aws_minion.user_data import get_config_yaml
 from aws_minion.user_data import get_bash_script
 from aws_minion.utils import FloatRange, ComparableLooseVersion
 
+# FIXME: Workaround for open GitHub PR (missing region eu-central-1): https://github.com/boto/boto/pull/2976
+BOTO_ENDPOINTS = os.path.join(os.path.dirname(__file__), 'myendpoints.json')
+os.environ['BOTO_ENDPOINTS'] = BOTO_ENDPOINTS
+
 # FIXME: hardcoded for eu-west-1: Ubuntu Server 14.04 LTS (HVM), SSD Volume Type
 AMI_ID = 'ami-f0b11187'
 
