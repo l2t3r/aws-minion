@@ -1,7 +1,7 @@
+import configparser
 import datetime
 import os
 import time
-from textwrap import dedent
 
 AWS_CREDENTIALS_PATH = '~/.aws/credentials'
 
@@ -24,17 +24,20 @@ def format_time(dt: datetime.datetime=None) -> str:
     return dt.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
 
-def write_aws_credentials(key_id, secret, session_token=None):
+def write_aws_credentials(profile, key_id, secret, session_token=None):
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     os.makedirs(os.path.dirname(credentials_path), exist_ok=True)
-    credentials_content = dedent('''\
-            [default]
-            aws_access_key_id     = {key_id}
-            aws_secret_access_key = {secret}
-            ''').format(key_id=key_id, secret=secret, datetime=datetime.datetime.now())
+    config = configparser.ConfigParser()
+    if os.path.exists(credentials_path):
+        config.read(credentials_path)
+
+    config[profile] = {}
+    config[profile]['aws_access_key_id'] = key_id
+    config[profile]['aws_secret_access_key'] = secret
     if session_token:
         # apparently the different AWS SDKs either use "session_token" or "security_token", so set both
-        credentials_content += 'aws_session_token = {}\n'.format(session_token)
-        credentials_content += 'aws_security_token = {}\n'.format(session_token)
+        config[profile]['aws_session_token'] = session_token
+        config[profile]['aws_security_token'] = session_token
+
     with open(credentials_path, 'w') as fd:
-        fd.write(credentials_content)
+        config.write(fd)

@@ -154,10 +154,12 @@ def cli(ctx, config_file, profile):
     if not profile_data and not 'configure'.startswith(ctx.invoked_subcommand):
         raise click.UsageError(('Profile "{}" has no configuration. ' +
                                 'Please run "minion configure" first.').format(profile))
+    # instruct Boto to use the right AWS credentials for our profile
+    os.environ['AWS_PROFILE'] = profile
     ctx.obj = Context(profile_data, profile)
 
 
-def ensure_aws_credentials(region):
+def ensure_aws_credentials(profile, region):
     extra_config = {}
     credentials_path = os.path.expanduser(AWS_CREDENTIALS_PATH)
     file_exists = os.path.exists(credentials_path)
@@ -168,13 +170,13 @@ def ensure_aws_credentials(region):
         region = region or click.prompt('AWS Region ID (e.g "eu-west-1")')
         url = click.prompt('SAML Identity Provider URL')
         user = click.prompt('SAML Username')
-        saml_login(region, url, user, overwrite_credentials=True)
+        saml_login(profile, region, url, user)
         extra_config['saml_identity_provider_url'] = url
         extra_config['saml_user'] = user
     elif not file_exists:
         key_id = click.prompt('AWS Access Key ID')
         secret = click.prompt('AWS Secret Access Key', hide_input=True)
-        write_aws_credentials(key_id, secret)
+        write_aws_credentials(profile, key_id, secret)
     return region, extra_config
 
 
@@ -193,7 +195,7 @@ def configure(ctx, region, vpc, domain, ssl_certificate_arn, loggly_account, log
     """
     Configure the AWS and Loggly connection settings
     """
-    region, extra_config = ensure_aws_credentials(region)
+    region, extra_config = ensure_aws_credentials(ctx.obj.profile, region)
 
     # load config file
     os.makedirs(CONFIG_DIR_PATH, exist_ok=True)
@@ -1225,10 +1227,9 @@ def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
 @click.option('--user', '-U', help='SAML Username', metavar='USERNAME')
 @click.option('--password', '-p', help='SAML Password', metavar='PWD')
 @click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
-@click.option('--overwrite-credentials', '-o', help='Always overwrite AWS credentials file', is_flag=True)
 @click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
 @click.pass_context
-def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars):
+def login(ctx, url, user, password, role, print_env_vars):
     """
     Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
     """
@@ -1240,7 +1241,7 @@ def login(ctx, url, user, password, role, overwrite_credentials, print_env_vars)
     user = user or ctx.obj.saml_user or click.prompt('SAML Username')
     role = role or ctx.obj.saml_role
 
-    saml_login(ctx.obj.region, url, user, password, role, overwrite_credentials, print_env_vars)
+    saml_login(ctx.obj.profile, ctx.obj.region, url, user, password, role, print_env_vars)
 
 
 @versions.command('tail')

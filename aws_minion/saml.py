@@ -6,6 +6,7 @@ import botocore.session
 from bs4 import BeautifulSoup
 import click
 import keyring
+import os
 import requests
 from aws_minion.console import Action, choice
 
@@ -60,7 +61,7 @@ def get_roles(saml_xml: str) -> list:
     return roles
 
 
-def saml_login(region, url, user, password=None, role=None, overwrite_credentials=False, print_env_vars=False):
+def saml_login(profile, region, url, user, password=None, role=None, print_env_vars=False):
     session = requests.Session()
     response = session.get(url)
 
@@ -104,8 +105,9 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
     with Action('Assuming role "{role_label}"..', role_label=get_role_label((provider_arn, role_arn))):
         saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
-        # HACK: botocore NEEDS a credentials file, but does not care about its contents
-        write_aws_credentials('123', '123', '123')
+        # botocore NEEDS some credentials, but does not care about their actual values
+        os.environ['AWS_ACCESS_KEY_ID'] = 'fake123'
+        os.environ['AWS_SECRET_ACCESS_KEY'] = 'fake123'
 
         session = botocore.session.get_session()
         sts = session.get_service('sts')
@@ -129,9 +131,5 @@ def saml_login(region, url, user, password=None, role=None, overwrite_credential
         export AWS_SESSION_TOKEN="{session_token}")
         export AWS_SECURITY_TOKEN="{session_token}"''').format(**vars()), fg='blue')
 
-    proceed = overwrite_credentials or click.confirm('Do you want to overwrite your AWS credentials ' +
-                                                     'file with the new temporary access key?', default=True)
-
-    if proceed:
-        with Action('Writing temporary AWS credentials..'):
-            write_aws_credentials(key_id, secret, session_token)
+    with Action('Writing temporary AWS credentials..'):
+        write_aws_credentials(profile, key_id, secret, session_token)
