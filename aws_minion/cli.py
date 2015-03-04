@@ -1228,8 +1228,9 @@ def cat_remote_file(ctx, instance_id: str, remote_file_path: str):
 @click.option('--password', '-p', help='SAML Password', metavar='PWD')
 @click.option('--role', '-r', help='Role to select (if user has multiple SAML roles)')
 @click.option('--print-env-vars', help='Print AWS credentials as environment variables', is_flag=True)
+@click.option('--overwrite-default-credentials', '-o', help='Overwrite [default] AWS credentials too', is_flag=True)
 @click.pass_context
-def login(ctx, url, user, password, role, print_env_vars):
+def login(ctx, url, user, password, role, print_env_vars, overwrite_default_credentials):
     """
     Login to SAML Identity Provider (shibboleth-idp) and retrieve temporary AWS credentials
     """
@@ -1241,7 +1242,8 @@ def login(ctx, url, user, password, role, print_env_vars):
     user = user or ctx.obj.saml_user or click.prompt('SAML Username')
     role = role or ctx.obj.saml_role
 
-    saml_login(ctx.obj.profile, ctx.obj.region, url, user, password, role, print_env_vars)
+    saml_login(ctx.obj.profile, ctx.obj.region, url, user, password, role, print_env_vars,
+               overwrite_default_credentials)
 
 
 @versions.command('tail')

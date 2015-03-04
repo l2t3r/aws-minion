@@ -61,7 +61,8 @@ def get_roles(saml_xml: str) -> list:
     return roles
 
 
-def saml_login(profile, region, url, user, password=None, role=None, print_env_vars=False):
+def saml_login(profile, region, url, user, password=None, role=None, print_env_vars=False,
+               overwrite_default_credentials=False):
     session = requests.Session()
     response = session.get(url)
 
@@ -131,5 +132,10 @@ def saml_login(profile, region, url, user, password=None, role=None, print_env_v
         export AWS_SESSION_TOKEN="{session_token}")
         export AWS_SECURITY_TOKEN="{session_token}"''').format(**vars()), fg='blue')
 
+    profiles_to_write = set([profile])
+    if overwrite_default_credentials:
+        profiles_to_write.add('default')
+
     with Action('Writing temporary AWS credentials..'):
-        write_aws_credentials(profile, key_id, secret, session_token)
+        for prof in profiles_to_write:
+            write_aws_credentials(prof, key_id, secret, session_token)
