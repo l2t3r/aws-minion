@@ -110,14 +110,18 @@ def saml_login(profile, region, url, user, password=None, role=None, print_env_v
         os.environ['AWS_ACCESS_KEY_ID'] = 'fake123'
         os.environ['AWS_SECRET_ACCESS_KEY'] = 'fake123'
 
-        session = botocore.session.get_session()
-        sts = session.get_service('sts')
-        operation = sts.get_operation('AssumeRoleWithSAML')
+        try:
+            session = botocore.session.get_session()
+            sts = session.get_service('sts')
+            operation = sts.get_operation('AssumeRoleWithSAML')
 
-        endpoint = sts.get_endpoint(region)
-        endpoint._signature_version = None
-        http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn,
-                                                      SAMLAssertion=saml_assertion)
+            endpoint = sts.get_endpoint(region)
+            endpoint._signature_version = None
+            http_response, response_data = operation.call(endpoint, role_arn=role_arn, principal_arn=provider_arn,
+                                                          SAMLAssertion=saml_assertion)
+        finally:
+            del os.environ['AWS_ACCESS_KEY_ID']
+            del os.environ['AWS_SECRET_ACCESS_KEY']
 
         key_id = response_data['Credentials']['AccessKeyId']
         secret = response_data['Credentials']['SecretAccessKey']
