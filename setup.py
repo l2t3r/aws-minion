@@ -151,11 +151,23 @@ def capture_objs(cls):
 
 def get_install_requirements(path):
     content = open(os.path.join(__location__, path)).read()
-    return [req for req in content.split('\\n') if req != '']
+    return [req for req in content.split('\n') if req != '']
 
 
 def read(fname):
     return open(os.path.join(__location__, fname)).read()
+
+
+def check_deps(deps):
+    '''check dependency licenses'''
+    from pkg_resources import Requirement
+    import requests
+    for dep in deps:
+        dep = Requirement.parse(dep)
+        url = 'https://pypi.python.org/pypi/{}/json'.format(dep.project_name)
+        r = requests.get(url)
+        data = r.json()
+        print(data['info'].get('name'), data['info'].get('license'))
 
 
 def setup_package():
@@ -171,6 +183,8 @@ def setup_package():
     docs_path = os.path.join(__location__, 'docs')
     docs_build_path = os.path.join(docs_path, '_build')
     install_reqs = get_install_requirements('requirements.txt')
+
+    # check_deps(install_reqs)
 
     command_options = {'docs': {
         'project': ('setup.py', MAIN_PACKAGE),
