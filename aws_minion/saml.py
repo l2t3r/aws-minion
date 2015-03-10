@@ -11,7 +11,7 @@ import requests
 from aws_minion.console import Action, choice
 
 
-def get_saml_response(html):
+def get_saml_response(html: str):
     """
     Parse SAMLResponse from Shibboleth page
 
@@ -28,13 +28,30 @@ def get_saml_response(html):
         return xml
 
 
-def get_role_label(role):
+def get_form_action(html: str):
+    '''
+    >>> get_form_action('<body><form action="test"></form></body>')
+    'test'
+    '''
+    soup = BeautifulSoup(html)
+    return soup.find('form').get('action')
+
+
+def get_role_label(role, account_names: dict=None):
     """
     >>> get_role_label(('arn:aws:iam::123:saml-provider/Shibboleth', 'arn:aws:iam::123:role/Shibboleth-PowerUser'))
-    'AWS Account 123: Shibboleth-PowerUser'
+    'AWS Account 123 (unknown): Shibboleth-PowerUser'
+
+    >>> get_role_label(('arn:aws:iam::123:saml-provider/A', 'arn:aws:iam::123:role/B'), {'123': 'blub'})
+    'AWS Account 123 (blub): B'
     """
     provider_arn, role_arn = role
-    return 'AWS Account {}: {}'.format(role_arn.split(':')[4], role_arn.split('/')[-1])
+    number = role_arn.split(':')[4]
+    if account_names and number in account_names:
+        name = account_names[number]
+    else:
+        name = 'unknown'
+    return 'AWS Account {} ({}): {}'.format(number, name, role_arn.split('/')[-1])
 
 
 def get_roles(saml_xml: str) -> list:
@@ -61,6 +78,35 @@ def get_roles(saml_xml: str) -> list:
     return roles
 
 
+def get_account_names(html: str) -> dict:
+    '''
+    Parse account names from AWS page
+
+    >>> get_account_names('')
+    {}
+
+    >>> get_account_names('<div class="saml-account-name">Account: blub  (123) </div>')
+    {'123': 'blub'}
+
+    >>> get_account_names('<div class="saml-account-name">Account: blub  123) </div>')
+    {}
+    '''
+    soup = BeautifulSoup(html)
+
+    accounts = {}
+    for elem in soup.find_all('div', attrs={'class': 'saml-account-name'}):
+        try:
+            name_number = elem.text.split(':', 1)[-1].strip().rstrip(')')
+            name, number = name_number.rsplit('(', 1)
+            name = name.strip()
+            number = number.strip()
+            accounts[number] = name
+        except:
+            # just skip account in case of parsing errors
+            pass
+    return accounts
+
+
 def saml_login(profile, region, url, user, password=None, role=None, print_env_vars=False,
                overwrite_default_credentials=False):
     session = requests.Session()
@@ -83,6 +129,11 @@ def saml_login(profile, region, url, user, password=None, role=None, print_env_v
                         'or use the "--password" option.', bold=True, fg='blue')
             return
 
+        url = get_form_action(response2.text)
+        encoded_xml = codecs.encode(saml_xml.encode('utf-8'), 'base64')
+        response3 = session.post(url, data={'SAMLResponse': encoded_xml})
+        account_names = get_account_names(response3.text)
+
     keyring.set_password(keyring_key, user, password)
 
     with Action('Checking SAML roles..') as act:
@@ -94,16 +145,16 @@ def saml_login(profile, region, url, user, password=None, role=None, print_env_v
     if len(roles) == 1:
         provider_arn, role_arn = roles[0]
     elif role:
-        matching_roles = [_role for _role in roles if role in get_role_label(_role)]
+        matching_roles = [_role for _role in roles if role in get_role_label(_role, account_names)]
         if not matching_roles or len(matching_roles) > 1:
             raise click.UsageError('Given role (--role) was not found or not unique')
         provider_arn, role_arn = matching_roles[0]
     else:
         roles.sort()
         provider_arn, role_arn = choice('Multiple roles found, please select one.',
-                                        [(r, get_role_label(r)) for r in roles])
+                                        [(r, get_role_label(r, account_names)) for r in roles])
 
-    with Action('Assuming role "{role_label}"..', role_label=get_role_label((provider_arn, role_arn))):
+    with Action('Assuming role "{role_label}"..', role_label=get_role_label((provider_arn, role_arn), account_names)):
         saml_assertion = codecs.encode(saml_xml.encode('utf-8'), 'base64').decode('ascii').replace('\n', '')
 
         # botocore NEEDS some credentials, but does not care about their actual values
