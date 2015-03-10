@@ -782,6 +782,12 @@ def map_subnets(subnets: list, route_tables: list) -> dict:
                 has_internet_gateway = True
         for assoc in table.associations:
             subnet_has_internet_gateway[assoc.subnet_id] = has_internet_gateway
+    if None in subnet_has_internet_gateway:
+        # main route table has no associations
+        # => use main route table for all subnets without any assigned table
+        for subnet in subnets:
+            if subnet.id not in subnet_has_internet_gateway:
+                subnet_has_internet_gateway[subnet.id] = subnet_has_internet_gateway[None]
     by_layer = {'public': [], 'shared': [], 'private': []}
     for subnet in subnets:
         layer = 'private'
