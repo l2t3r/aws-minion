@@ -1,7 +1,7 @@
 from textwrap import dedent
 import click
 import requests
-from aws_minion.console import error
+from clickclick import error
 
 LOGGLY_SEARCH_REQUEST_TEMPLATE = 'https://{account}.loggly.com/apiv2/search' \
                                  '?q=syslog.appName:{app_identifier}&from={start}&until={until}&size={size}&order=asc'

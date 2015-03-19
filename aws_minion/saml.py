@@ -8,7 +8,7 @@ import click
 import keyring
 import os
 import requests
-from aws_minion.console import Action, choice
+from clickclick import Action, choice
 
 
 def get_saml_response(html: str):

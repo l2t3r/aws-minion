@@ -1,7 +1,7 @@
 boto==2.36.0
 botocore>=0.91.0
 paramiko==1.15.1
-click==3.3
+clickclick==0.2
 PyYAML==3.11
 requests>=2.2.1
 beautifulsoup4==4.3.2

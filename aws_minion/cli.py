@@ -22,10 +22,11 @@ import sys
 import yaml
 from boto.manage.cmdshell import sshclient_from_instance
 import codecs
+from clickclick import action, ok, error, warning, choice, Action, AliasedGroup
 import aws_minion
 from aws_minion.aws import AWS_CREDENTIALS_PATH, write_aws_credentials, parse_time, format_time
 
-from aws_minion.console import print_table, action, ok, error, warning, choice, Action, AliasedGroup
+from aws_minion.console import print_table
 from aws_minion.context import Context, ApplicationNotFound, Application, APPLICATION_NAME_PATTERN, \
     APPLICATION_VERSION_PATTERN
 from aws_minion.docker import is_docker_image_valid, extract_registry, replace_registry, \
