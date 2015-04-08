@@ -1,8 +1,8 @@
-boto==2.36.0
+boto>=2.36.0
 botocore>=0.91.0
-paramiko==1.15.1
-clickclick==0.3
-PyYAML==3.11
+paramiko>=1.15.1
+clickclick>=0.5
+PyYAML>=3.11
 requests>=2.2.1
-beautifulsoup4==4.3.2
+beautifulsoup4>=4.3.2
 keyring>=5.0
